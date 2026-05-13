@@ -1,4 +1,4 @@
-import { index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const tokens = pgTable("tokens", {
   id: text("id").primaryKey(),
@@ -44,7 +44,9 @@ export const holderSegments = pgTable("holder_segments", {
   previousSupplyPercent: numeric("previous_supply_percent"),
   currentSupplyPercent: numeric("current_supply_percent"),
   detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
-  explanationJson: jsonb("explanation_json")
+  explanationJson: jsonb("explanation_json").notNull(),
+  sourceEndpointsJson: jsonb("source_endpoints_json").notNull(),
+  sourceRunId: text("source_run_id").notNull()
 });
 
 export const tokenSnapshots = pgTable("token_snapshots", {
@@ -60,12 +62,16 @@ export const tokenSnapshots = pgTable("token_snapshots", {
   whaleConfidenceScore: integer("whale_confidence_score"),
   churnRiskScore: integer("churn_risk_score"),
   distributionRiskScore: integer("distribution_risk_score"),
+  newHolders: integer("new_holders").default(0).notNull(),
+  likelyExited: integer("likely_exited").default(0).notNull(),
+  churnRate: numeric("churn_rate").default("0").notNull(),
+  scoreBreakdownJson: jsonb("score_breakdown_json").notNull(),
   snapshotAt: timestamp("snapshot_at", { withTimezone: true }).notNull(),
-  sourceRunId: text("source_run_id")
+  sourceRunId: text("source_run_id").notNull()
 });
 
 export const alerts = pgTable("alerts", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: text("id").primaryKey(),
   tokenId: text("token_id").notNull(),
   type: text("type").notNull(),
   severity: text("severity").notNull(),
@@ -77,7 +83,8 @@ export const alerts = pgTable("alerts", {
   sourceEndpointsJson: jsonb("source_endpoints_json").notNull(),
   confidence: integer("confidence").notNull(),
   status: text("status").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  sourceRunId: text("source_run_id").notNull()
 });
 
 export const campaignMarkers = pgTable("campaign_markers", {
@@ -91,7 +98,7 @@ export const campaignMarkers = pgTable("campaign_markers", {
 });
 
 export const pipelineRuns = pgTable("pipeline_runs", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: text("id").primaryKey(),
   tokenId: text("token_id"),
   status: text("status").notNull(),
   mode: text("mode").notNull(),
@@ -115,7 +122,7 @@ export const apiCallLogs = pgTable("api_call_logs", {
   tokenId: text("token_id"),
   walletAddress: text("wallet_address"),
   statusCode: integer("status_code"),
-  cacheHit: text("cache_hit").notNull(),
+  cacheHit: boolean("cache_hit").notNull(),
   durationMs: integer("duration_ms"),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()

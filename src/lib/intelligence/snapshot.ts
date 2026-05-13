@@ -4,11 +4,11 @@ import { normalizeHolders } from "@/lib/birdeye/normalizers";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 import { calculateSnapshotScores } from "@/lib/intelligence/scoring";
 import { generateAlerts } from "@/lib/intelligence/alerts";
-import type { HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
+import type { ApiCallLog, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
 export class SnapshotError extends Error {
   constructor(
-    readonly code: "INVALID_TOKEN_ADDRESS" | "BIRDEYE_API_KEY_MISSING" | "SNAPSHOT_FAILED",
+    readonly code: "INVALID_TOKEN_ADDRESS" | "BIRDEYE_API_KEY_MISSING" | "TOKEN_HOLDER_SOURCE_FAILED" | "SNAPSHOT_FAILED",
     message: string,
     readonly status = 400
   ) {
@@ -24,6 +24,7 @@ export async function runManualSnapshot(input: {
   mode?: "demo" | "live";
   previousHolders?: HolderSnapshot[];
   previousSnapshots?: TokenSnapshot[];
+  runId?: string;
 }): Promise<TokenDataset> {
   if (input.mode === "demo") {
     return getDemoDataset();
@@ -44,7 +45,7 @@ export async function runManualSnapshot(input: {
 
   const holdersResult = await client.getTokenHolders(chain, address, 100);
   if (!holdersResult.ok) {
-    throw new SnapshotError("SNAPSHOT_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502);
+    throw new SnapshotError("TOKEN_HOLDER_SOURCE_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502);
   }
 
   const [distribution, price, security, transfers] = await Promise.all([
@@ -57,7 +58,7 @@ export async function runManualSnapshot(input: {
   const holders = normalizeHolders(holdersResult.data);
   const previousHolders = input.previousHolders ?? [];
   const previousSnapshots = input.previousSnapshots ?? [];
-  const segments = classifyHolderSegments(previousHolders, holders);
+  const segments = previousHolders.length ? classifyHolderSegments(previousHolders, holders) : createBaselineSegments(holders);
   const currentSnapshot = calculateSnapshotScores({
     previousTrackedWallets: previousHolders.length,
     currentTrackedWallets: holders.length,
@@ -69,7 +70,7 @@ export async function runManualSnapshot(input: {
   });
 
   const pipelineRun: PipelineRun = {
-    id: `run-${Date.now()}`,
+    id: input.runId ?? `run-${Date.now()}`,
     status: [distribution, price, security, transfers].some((result) => !result.ok) ? "partial" : "complete",
     mode: "live",
     apiCallsUsed: client.usage.calls,
@@ -84,7 +85,7 @@ export async function runManualSnapshot(input: {
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
     sources: [
-      { source: "Token Holder", status: "complete", detail: `${holders.length} holders scanned`, calls: holdersResult.cacheHit ? 0 : 1 },
+      { source: "Token Holder", status: "complete", detail: previousHolders.length ? `${holders.length} holders scanned` : `${holders.length} holders scanned; baseline snapshot`, calls: holdersResult.cacheHit ? 0 : 1 },
       { source: "Holder Distribution", status: distribution.ok ? "complete" : "missing", detail: distribution.ok ? "concentration calculated" : distribution.error, calls: 1 },
       { source: "Price Stats", status: price.ok ? "complete" : "missing", detail: price.ok ? "market context added" : price.error, calls: 1 },
       { source: "Token Security", status: security.ok ? "complete" : "missing", detail: security.ok ? "risk context added" : security.error, calls: 1 },
@@ -92,6 +93,16 @@ export async function runManualSnapshot(input: {
       { source: "Wallet Current Net Worth", status: "skipped", detail: "wallet enrichment deferred unless a high-priority wallet needs it", calls: 0 }
     ]
   };
+  const apiCallLogs: ApiCallLog[] = [holdersResult, distribution, price, security, transfers].map((result) => ({
+    runId: pipelineRun.id,
+    endpoint: result.sourceLabel,
+    tokenId: input.tokenId,
+    statusCode: result.statusCode,
+    cacheHit: result.cacheHit,
+    durationMs: result.durationMs,
+    errorMessage: result.ok ? undefined : result.error,
+    createdAt: new Date().toISOString()
+  }));
 
   return {
     token: {
@@ -112,10 +123,26 @@ export async function runManualSnapshot(input: {
     segments,
     alerts: generateAlerts(segments, currentSnapshot, previousSnapshots.at(-1)),
     campaigns: [],
-    pipelineRun
+    pipelineRun,
+    apiCallLogs
   };
 }
 
 export function isDemoMode() {
   return process.env.DEMO_MODE === "true";
+}
+
+function createBaselineSegments(holders: HolderSnapshot[]): HolderSegment[] {
+  return holders.map((holder) => ({
+    walletAddress: holder.walletAddress,
+    segment: "BASELINE_HOLDER",
+    previousBalance: 0,
+    currentBalance: holder.balance,
+    changePercent: 0,
+    currentRank: holder.holderRank,
+    currentSupplyPercent: holder.supplyPercent,
+    detectedAt: holder.snapshotAt,
+    explanation: ["Baseline live snapshot. Run another snapshot to calculate churn and balance-change segments."],
+    sourceEndpoints: ["Token Holder"]
+  }));
 }

@@ -111,7 +111,7 @@ UPSTASH_REDIS_REST_TOKEN=
 
 `BIRDEYE_API_KEY` is server-only. All Birdeye calls go through `src/lib/birdeye/client.ts`.
 
-If `DATABASE_URL` or `BIRDEYE_API_KEY` is missing, the app runs deterministic demo mode and clearly states data is not persisted.
+If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly states data is not persisted. If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can be read from the database but live snapshots return `BIRDEYE_API_KEY_MISSING`.
 
 ## Vercel Cron
 
@@ -136,6 +136,7 @@ Cron processes only a tiny batch per run. Manual snapshot remains the primary MV
 
 ```bash
 npm install
+npm run db:push
 npm run dev
 npm run seed:demo
 npm run typecheck
