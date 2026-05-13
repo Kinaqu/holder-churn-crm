@@ -1,11 +1,12 @@
 import { runManualSnapshot } from "@/lib/intelligence/snapshot";
-import { getLatestHolderSnapshots, getStoredTokenSnapshots, getToken, isDemoTokenMode } from "@/lib/db/repository";
+import { createPipelineRun, getLatestHolderSnapshots, getStoredTokenSnapshots, getToken, isDemoTokenMode, markPipelineRunFailed, saveSnapshotDataset } from "@/lib/db/repository";
 import { normalizeAndValidateTokenInput } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
   const params = await context.params;
+  let runningRun: { id: string; startedAt: string; tokenId: string } | null = null;
   try {
     const token = await getToken(params.id);
 
@@ -29,6 +30,8 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       return Response.json({ ok: false, code: validation.code, message: validation.message, partial: false }, { status: 400 });
     }
 
+    const run = await createPipelineRun({ tokenId: token.id, mode: "live" });
+    runningRun = { id: run.id, startedAt: run.startedAt, tokenId: token.id };
     const [previousHolders, previousSnapshots] = await Promise.all([getLatestHolderSnapshots(token.id), getStoredTokenSnapshots(token.id)]);
 
     const dataset = await runManualSnapshot({
@@ -38,8 +41,10 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       token,
       mode: "live",
       previousHolders,
-      previousSnapshots
+      previousSnapshots,
+      runId: run.id
     });
+    await saveSnapshotDataset(dataset);
 
     return Response.json({
       ok: true,
@@ -50,14 +55,36 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "SNAPSHOT_FAILED";
     const status = error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : 500;
+    if (runningRun) {
+      try {
+        await markPipelineRunFailed({
+          tokenId: runningRun.tokenId,
+          runId: runningRun.id,
+          startedAt: runningRun.startedAt,
+          errorMessage: code
+        });
+      } catch (persistenceError) {
+        console.error("Failed to mark pipeline run failed", persistenceError);
+      }
+    }
+    console.error("Snapshot failed", error);
     return Response.json(
       {
         ok: false,
         code,
-        message: error instanceof Error ? error.message : "Snapshot failed.",
+        message: publicSnapshotMessage(code, error),
         partial: false
       },
       { status }
     );
   }
+}
+
+function publicSnapshotMessage(code: string, error: unknown) {
+  if (code === "BIRDEYE_API_KEY_MISSING") return "BIRDEYE_API_KEY is required to run a live Birdeye snapshot.";
+  if (code === "INVALID_TOKEN_ADDRESS") return "Token address is invalid for the selected chain.";
+  if (code === "TOKEN_HOLDER_SOURCE_FAILED") return "Birdeye Token Holder source failed, so the snapshot could not be persisted.";
+  if (code === "PERSISTENCE_WRITE_FAILED") return "Snapshot completed but could not be written to the database.";
+  if (error instanceof Error && error.message.includes("Token Holder is required")) return "Birdeye Token Holder source failed, so the snapshot could not be persisted.";
+  return "Snapshot failed.";
 }

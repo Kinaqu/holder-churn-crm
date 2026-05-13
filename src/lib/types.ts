@@ -1,6 +1,7 @@
 export type Severity = "low" | "medium" | "high" | "critical";
 
 export type SegmentType =
+  | "BASELINE_HOLDER"
   | "NEW_HOLDER"
   | "LIKELY_EXITED"
   | "REDUCED_POSITION"
@@ -155,4 +156,18 @@ export type TokenDataset = {
   alerts: Alert[];
   campaigns: CampaignMarker[];
   pipelineRun: PipelineRun;
+  apiCallLogs?: ApiCallLog[];
+};
+
+export type ApiCallLog = {
+  id?: string;
+  runId: string;
+  endpoint: BirdeyeSource | string;
+  tokenId?: string;
+  walletAddress?: string;
+  statusCode?: number;
+  cacheHit: boolean;
+  durationMs: number;
+  errorMessage?: string;
+  createdAt: string;
 };

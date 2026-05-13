@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "db:push": "drizzle-kit push",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "d1:init": "tsx scripts/apply-d1-schema.ts"
   },

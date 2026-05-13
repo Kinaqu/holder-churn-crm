@@ -1,12 +1,12 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/lib/db/client";
 import { d1Batch, d1Query, hasD1 } from "@/lib/db/d1-client";
-import { tokens } from "@/lib/db/schema";
+import { alerts, apiCallLogs, holderSegments, holderSnapshots, pipelineRuns, tokenSnapshots, tokens } from "@/lib/db/schema";
 import { getDemoDataset } from "@/lib/demo/demo-data";
 import { createStableTokenId } from "@/lib/tokens";
-import type { Alert, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
+import type { Alert, ApiCallLog, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
 type TokenRow = {
   id: string;
@@ -105,7 +105,7 @@ type PipelineRow = {
 };
 
 export function hasPersistentStore() {
-  return hasDatabase() || hasD1();
+  return hasDatabase();
 }
 
 export function isDemoTokenMode() {
@@ -198,7 +198,23 @@ export async function createToken(input: { chain: string; address: string; symbo
 export async function getLatestHolderSnapshots(tokenId: string): Promise<HolderSnapshot[]> {
   if (!hasPersistentStore()) return [];
 
-  if (hasDatabase()) return [];
+  if (hasDatabase()) {
+    const latest = await getDb()
+      .select({ snapshotAt: holderSnapshots.snapshotAt })
+      .from(holderSnapshots)
+      .where(eq(holderSnapshots.tokenId, tokenId))
+      .orderBy(desc(holderSnapshots.snapshotAt))
+      .limit(1);
+    const snapshotAt = latest[0]?.snapshotAt;
+    if (!snapshotAt) return [];
+
+    const rows = await getDb()
+      .select()
+      .from(holderSnapshots)
+      .where(and(eq(holderSnapshots.tokenId, tokenId), eq(holderSnapshots.snapshotAt, snapshotAt)))
+      .orderBy(holderSnapshots.holderRank);
+    return rows.map(mapPgHolder);
+  }
 
   const latest = await d1Query<{ snapshot_at: string }>(
     "SELECT snapshot_at FROM holder_snapshots WHERE token_id = ? GROUP BY snapshot_at ORDER BY snapshot_at DESC LIMIT 1",
@@ -216,6 +232,46 @@ export async function getLatestHolderSnapshots(tokenId: string): Promise<HolderS
   return rows.results?.map(mapHolder) ?? [];
 }
 
+export async function getPreviousHolderSnapshots(tokenId: string, beforeSnapshotAt?: string): Promise<HolderSnapshot[]> {
+  if (!hasPersistentStore()) return [];
+  if (!beforeSnapshotAt) return getLatestHolderSnapshots(tokenId);
+
+  if (hasDatabase()) {
+    const before = new Date(beforeSnapshotAt);
+    const latest = await getDb()
+      .select({ snapshotAt: holderSnapshots.snapshotAt })
+      .from(holderSnapshots)
+      .where(and(eq(holderSnapshots.tokenId, tokenId), lt(holderSnapshots.snapshotAt, before)))
+      .orderBy(desc(holderSnapshots.snapshotAt))
+      .limit(1);
+    const snapshotAt = latest[0]?.snapshotAt;
+    if (!snapshotAt) return [];
+
+    const rows = await getDb()
+      .select()
+      .from(holderSnapshots)
+      .where(and(eq(holderSnapshots.tokenId, tokenId), eq(holderSnapshots.snapshotAt, snapshotAt)))
+      .orderBy(holderSnapshots.holderRank);
+    return rows.map(mapPgHolder);
+  }
+
+  return getLatestHolderSnapshots(tokenId);
+}
+
+export async function getHolderSnapshotHistory(tokenId: string): Promise<HolderSnapshot[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(holderSnapshots)
+      .where(eq(holderSnapshots.tokenId, tokenId))
+      .orderBy(desc(holderSnapshots.snapshotAt), holderSnapshots.holderRank)
+      .limit(5000);
+    return rows.map(mapPgHolder);
+  }
+  return getLatestHolderSnapshots(tokenId);
+}
+
 export async function getTokenDataset(tokenId: string): Promise<TokenDataset | null> {
   if (tokenId === getDemoDataset().token.id) return getDemoDataset();
   if (!hasPersistentStore()) return null;
@@ -224,7 +280,24 @@ export async function getTokenDataset(tokenId: string): Promise<TokenDataset | n
   if (!token) return null;
 
   if (hasDatabase()) {
-    return emptyLiveDataset(token);
+    const [snapshots, holders, segments, alerts, pipelineRun] = await Promise.all([
+      getTokenSnapshotHistory(tokenId),
+      getLatestHolderSnapshots(tokenId),
+      getLatestHolderSegments(tokenId),
+      getAlertsByToken(tokenId),
+      getLatestPipelineRun(tokenId)
+    ]);
+
+    return {
+      token: { ...token, lastSnapshotAt: snapshots.at(-1)?.snapshotAt ?? token.lastSnapshotAt },
+      snapshots: snapshots.length ? snapshots : [emptySnapshot()],
+      holders,
+      previousHolders: [],
+      segments,
+      alerts,
+      campaigns: [],
+      pipelineRun: pipelineRun ?? emptyPipelineRun(tokenId)
+    };
   }
 
   const [snapshots, holders, segments, alerts, campaigns, pipelineRun] = await Promise.all([
@@ -250,11 +323,346 @@ export async function getTokenDataset(tokenId: string): Promise<TokenDataset | n
 
 export async function getStoredTokenSnapshots(tokenId: string): Promise<TokenSnapshot[]> {
   if (!hasPersistentStore()) return [];
-  if (hasDatabase()) return [];
+  if (hasDatabase()) return getTokenSnapshotHistory(tokenId);
   return getTokenSnapshots(tokenId);
 }
 
+export async function getTokenSnapshotHistory(tokenId: string): Promise<TokenSnapshot[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(tokenSnapshots)
+      .where(eq(tokenSnapshots.tokenId, tokenId))
+      .orderBy(tokenSnapshots.snapshotAt)
+      .limit(30);
+    return rows.map(mapPgSnapshot);
+  }
+  return getTokenSnapshots(tokenId);
+}
+
+export async function getLatestTokenSnapshot(tokenId: string): Promise<TokenSnapshot | null> {
+  const snapshots = await getTokenSnapshotHistory(tokenId);
+  return snapshots.at(-1) ?? null;
+}
+
+export async function getLatestHolderSegments(tokenId: string): Promise<HolderSegment[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const latest = await getDb()
+      .select({ detectedAt: holderSegments.detectedAt })
+      .from(holderSegments)
+      .where(eq(holderSegments.tokenId, tokenId))
+      .orderBy(desc(holderSegments.detectedAt))
+      .limit(1);
+    const detectedAt = latest[0]?.detectedAt;
+    if (!detectedAt) return [];
+
+    const rows = await getDb()
+      .select()
+      .from(holderSegments)
+      .where(and(eq(holderSegments.tokenId, tokenId), eq(holderSegments.detectedAt, detectedAt)))
+      .limit(500);
+    return rows.map(mapPgSegment).sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+  }
+  return getLatestSegments(tokenId);
+}
+
+export async function getAlertsByToken(tokenId: string): Promise<Alert[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(alerts)
+      .where(eq(alerts.tokenId, tokenId))
+      .orderBy(desc(alerts.createdAt))
+      .limit(100);
+    return rows.map(mapPgAlert);
+  }
+  return getAlerts(tokenId);
+}
+
+export async function getPipelineRunsByToken(tokenId: string): Promise<PipelineRun[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(pipelineRuns)
+      .where(eq(pipelineRuns.tokenId, tokenId))
+      .orderBy(desc(pipelineRuns.startedAt))
+      .limit(50);
+    return rows.map(mapPgPipelineRun);
+  }
+  const latest = await getLatestPipelineRun(tokenId);
+  return latest ? [latest] : [];
+}
+
+export async function getLatestPipelineRun(tokenId: string): Promise<PipelineRun | null> {
+  if (!hasPersistentStore()) return null;
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(pipelineRuns)
+      .where(eq(pipelineRuns.tokenId, tokenId))
+      .orderBy(desc(pipelineRuns.startedAt))
+      .limit(1);
+    return rows[0] ? mapPgPipelineRun(rows[0]) : null;
+  }
+  const rows = await d1Query<PipelineRow>("SELECT * FROM pipeline_runs WHERE token_id = ? ORDER BY started_at DESC LIMIT 1", [tokenId]);
+  const row = rows.results?.[0];
+  return row ? mapPipelineRun(row) : null;
+}
+
+export async function getApiCallLogsByRun(runId: string): Promise<ApiCallLog[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(apiCallLogs)
+      .where(eq(apiCallLogs.runId, runId))
+      .orderBy(apiCallLogs.createdAt)
+      .limit(100);
+    return rows.map(mapPgApiCallLog);
+  }
+  return [];
+}
+
+export async function createPipelineRun(input: { id?: string; tokenId: string; mode?: PipelineRun["mode"] }) {
+  const now = new Date().toISOString();
+  const run: PipelineRun = {
+    id: input.id ?? crypto.randomUUID(),
+    tokenId: input.tokenId,
+    status: "running",
+    mode: input.mode ?? "live",
+    apiCallsUsed: 0,
+    apiSafeBudget: 50,
+    holdersScanned: 0,
+    walletsEnriched: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    durationMs: 0,
+    rateLimitBudgetUsed: 0,
+    stayedUnderLimit: true,
+    startedAt: now,
+    sources: []
+  } as PipelineRun & { tokenId: string };
+
+  if (hasDatabase()) {
+    await getDb().insert(pipelineRuns).values({
+      id: run.id,
+      tokenId: input.tokenId,
+      status: run.status,
+      mode: run.mode,
+      apiCallsUsed: 0,
+      endpointsUsedJson: [],
+      holdersScanned: 0,
+      walletsEnriched: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      durationMs: 0,
+      rateLimitBudgetUsed: 0,
+      startedAt: new Date(now),
+      completedAt: null,
+      errorMessage: null
+    });
+  }
+
+  return run;
+}
+
+export async function updatePipelineRun(tokenId: string, run: PipelineRun, errorMessage?: string | null) {
+  if (!hasDatabase()) return;
+  await getDb()
+    .update(pipelineRuns)
+    .set({
+      status: run.status,
+      mode: run.mode,
+      apiCallsUsed: run.apiCallsUsed,
+      endpointsUsedJson: run.sources,
+      holdersScanned: run.holdersScanned,
+      walletsEnriched: run.walletsEnriched,
+      cacheHits: run.cacheHits,
+      cacheMisses: run.cacheMisses,
+      durationMs: run.durationMs,
+      rateLimitBudgetUsed: run.rateLimitBudgetUsed,
+      completedAt: run.completedAt ? new Date(run.completedAt) : null,
+      errorMessage: errorMessage ?? null,
+      tokenId
+    })
+    .where(eq(pipelineRuns.id, run.id));
+}
+
+export async function markPipelineRunFailed(input: { tokenId: string; runId: string; startedAt: string; errorMessage: string }) {
+  const completedAt = new Date().toISOString();
+  const run: PipelineRun = {
+    id: input.runId,
+    status: "failed",
+    mode: "live",
+    apiCallsUsed: 0,
+    apiSafeBudget: 50,
+    holdersScanned: 0,
+    walletsEnriched: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    durationMs: Date.now() - new Date(input.startedAt).getTime(),
+    rateLimitBudgetUsed: 0,
+    stayedUnderLimit: true,
+    startedAt: input.startedAt,
+    completedAt,
+    sources: [{ source: "Token Holder", status: "missing", detail: input.errorMessage, calls: 0 }]
+  };
+  await updatePipelineRun(input.tokenId, run, input.errorMessage);
+  return run;
+}
+
+export async function saveHolderSnapshots(tokenId: string, runId: string, holders: HolderSnapshot[], snapshotAt: string) {
+  if (!hasDatabase() || holders.length === 0) return;
+  await getDb().insert(holderSnapshots).values(
+    holders.map((holder) => ({
+      tokenId,
+      walletAddress: holder.walletAddress,
+      balance: decimal(holder.balance),
+      balanceUsd: decimal(holder.balanceUsd),
+      supplyPercent: decimal(holder.supplyPercent),
+      holderRank: holder.holderRank,
+      snapshotAt: new Date(snapshotAt),
+      sourceEndpoint: holder.sourceEndpoint,
+      sourceRunId: runId
+    }))
+  );
+}
+
+export async function saveHolderSegments(tokenId: string, runId: string, segments: HolderSegment[]) {
+  if (!hasDatabase() || segments.length === 0) return;
+  await getDb().insert(holderSegments).values(
+    segments.map((segment) => ({
+      tokenId,
+      walletAddress: segment.walletAddress,
+      segment: segment.segment,
+      previousBalance: decimal(segment.previousBalance),
+      currentBalance: decimal(segment.currentBalance),
+      changePercent: decimal(segment.changePercent),
+      previousRank: segment.previousRank ?? null,
+      currentRank: segment.currentRank ?? null,
+      previousSupplyPercent: segment.previousSupplyPercent === undefined ? null : decimal(segment.previousSupplyPercent),
+      currentSupplyPercent: segment.currentSupplyPercent === undefined ? null : decimal(segment.currentSupplyPercent),
+      detectedAt: new Date(segment.detectedAt),
+      explanationJson: segment.explanation,
+      sourceEndpointsJson: segment.sourceEndpoints,
+      sourceRunId: runId
+    }))
+  );
+}
+
+export async function saveTokenSnapshot(tokenId: string, runId: string, snapshot: TokenSnapshot) {
+  if (!hasDatabase()) return;
+  await getDb().insert(tokenSnapshots).values({
+    tokenId,
+    priceUsd: decimal(snapshot.priceUsd),
+    priceChange24h: decimal(snapshot.priceChange24h),
+    holderCount: snapshot.holderCount,
+    top10SupplyPercent: decimal(snapshot.top10SupplyPercent),
+    top50SupplyPercent: decimal(snapshot.top50SupplyPercent),
+    concentrationScore: snapshot.concentrationScore,
+    holderHealthScore: snapshot.holderHealthScore,
+    whaleConfidenceScore: snapshot.whaleConfidenceScore,
+    churnRiskScore: snapshot.churnRiskScore,
+    distributionRiskScore: snapshot.distributionRiskScore,
+    newHolders: snapshot.newHolders,
+    likelyExited: snapshot.likelyExited,
+    churnRate: decimal(snapshot.churnRate),
+    scoreBreakdownJson: snapshot.scoreBreakdown,
+    snapshotAt: new Date(snapshot.snapshotAt),
+    sourceRunId: runId
+  });
+}
+
+export async function saveAlerts(tokenId: string, runId: string, items: Alert[]) {
+  if (!hasDatabase() || items.length === 0) return;
+  for (const alert of items) {
+    await getDb()
+      .insert(alerts)
+      .values({
+        id: alert.id,
+        tokenId,
+        type: alert.type,
+        severity: alert.severity,
+        walletAddress: alert.walletAddress ?? null,
+        title: alert.title,
+        message: alert.message,
+        reasonJson: alert.reason,
+        nextBestActionsJson: alert.nextBestActions,
+        sourceEndpointsJson: alert.sourceEndpoints,
+        confidence: alert.confidence,
+        status: alert.status,
+        createdAt: new Date(alert.createdAt),
+        sourceRunId: runId
+      })
+      .onConflictDoUpdate({
+        target: alerts.id,
+        set: {
+          tokenId,
+          type: alert.type,
+          severity: alert.severity,
+          walletAddress: alert.walletAddress ?? null,
+          title: alert.title,
+          message: alert.message,
+          reasonJson: alert.reason,
+          nextBestActionsJson: alert.nextBestActions,
+          sourceEndpointsJson: alert.sourceEndpoints,
+          confidence: alert.confidence,
+          status: alert.status,
+          createdAt: new Date(alert.createdAt),
+          sourceRunId: runId
+        }
+      });
+  }
+}
+
+export async function saveApiCallLogs(logs: ApiCallLog[]) {
+  if (!hasDatabase() || logs.length === 0) return;
+  await getDb().insert(apiCallLogs).values(
+    logs.map((log) => ({
+      runId: log.runId,
+      endpoint: String(log.endpoint),
+      tokenId: log.tokenId ?? null,
+      walletAddress: log.walletAddress ?? null,
+      statusCode: log.statusCode ?? null,
+      cacheHit: log.cacheHit,
+      durationMs: log.durationMs,
+      errorMessage: log.errorMessage ?? null,
+      createdAt: new Date(log.createdAt)
+    }))
+  );
+}
+
 export async function saveSnapshotDataset(dataset: TokenDataset) {
+  if (hasDatabase()) {
+    const token = dataset.token;
+    const run = dataset.pipelineRun;
+    const latestSnapshot = dataset.snapshots.at(-1);
+    if (!latestSnapshot) return;
+
+    await getDb()
+      .update(tokens)
+      .set({
+        symbol: token.symbol,
+        name: token.name,
+        decimals: token.decimals,
+        securityStatus: token.securityStatus,
+        updatedAt: new Date(latestSnapshot.snapshotAt)
+      })
+      .where(eq(tokens.id, token.id));
+
+    await saveHolderSnapshots(token.id, run.id, dataset.holders, latestSnapshot.snapshotAt);
+    await saveHolderSegments(token.id, run.id, dataset.segments);
+    await saveTokenSnapshot(token.id, run.id, latestSnapshot);
+    await saveAlerts(token.id, run.id, dataset.alerts);
+    await saveApiCallLogs(dataset.apiCallLogs ?? []);
+    await updatePipelineRun(token.id, run);
+    return;
+  }
+
   if (!hasD1()) return;
 
   const token = dataset.token;
@@ -442,12 +850,6 @@ async function getCampaigns(tokenId: string): Promise<CampaignMarker[]> {
   return rows.results?.map(mapCampaign) ?? [];
 }
 
-async function getLatestPipelineRun(tokenId: string): Promise<PipelineRun | null> {
-  const rows = await d1Query<PipelineRow>("SELECT * FROM pipeline_runs WHERE token_id = ? ORDER BY started_at DESC LIMIT 1", [tokenId]);
-  const row = rows.results?.[0];
-  return row ? mapPipelineRun(row) : null;
-}
-
 function mapToken(row: TokenRow): Token {
   return {
     id: row.id,
@@ -464,6 +866,12 @@ function mapToken(row: TokenRow): Token {
 }
 
 type PgTokenRow = typeof tokens.$inferSelect;
+type PgHolderRow = typeof holderSnapshots.$inferSelect;
+type PgSegmentRow = typeof holderSegments.$inferSelect;
+type PgSnapshotRow = typeof tokenSnapshots.$inferSelect;
+type PgAlertRow = typeof alerts.$inferSelect;
+type PgPipelineRow = typeof pipelineRuns.$inferSelect;
+type PgApiCallLogRow = typeof apiCallLogs.$inferSelect;
 
 function mapPgToken(row: PgTokenRow): Token {
   const updatedAt = toIso(row.updatedAt);
@@ -478,6 +886,107 @@ function mapPgToken(row: PgTokenRow): Token {
     lastSnapshotAt: updatedAt,
     createdAt: toIso(row.createdAt),
     updatedAt
+  };
+}
+
+function mapPgHolder(row: PgHolderRow): HolderSnapshot {
+  return {
+    walletAddress: row.walletAddress,
+    balance: Number(row.balance),
+    balanceUsd: Number(row.balanceUsd ?? 0),
+    supplyPercent: Number(row.supplyPercent ?? 0),
+    holderRank: row.holderRank ?? 0,
+    snapshotAt: toIso(row.snapshotAt),
+    sourceEndpoint: "Token Holder"
+  };
+}
+
+function mapPgSegment(row: PgSegmentRow): HolderSegment {
+  return {
+    walletAddress: row.walletAddress,
+    segment: row.segment as HolderSegment["segment"],
+    previousBalance: Number(row.previousBalance ?? 0),
+    currentBalance: Number(row.currentBalance ?? 0),
+    changePercent: Number(row.changePercent ?? 0),
+    previousRank: row.previousRank ?? undefined,
+    currentRank: row.currentRank ?? undefined,
+    previousSupplyPercent: row.previousSupplyPercent === null ? undefined : Number(row.previousSupplyPercent),
+    currentSupplyPercent: row.currentSupplyPercent === null ? undefined : Number(row.currentSupplyPercent),
+    detectedAt: toIso(row.detectedAt),
+    explanation: Array.isArray(row.explanationJson) ? row.explanationJson.map(String) : [],
+    sourceEndpoints: Array.isArray(row.sourceEndpointsJson) ? (row.sourceEndpointsJson as HolderSegment["sourceEndpoints"]) : ["Token Holder"]
+  };
+}
+
+function mapPgSnapshot(row: PgSnapshotRow): TokenSnapshot {
+  return {
+    snapshotAt: toIso(row.snapshotAt),
+    priceUsd: Number(row.priceUsd ?? 0),
+    priceChange24h: Number(row.priceChange24h ?? 0),
+    holderCount: row.holderCount ?? 0,
+    top10SupplyPercent: Number(row.top10SupplyPercent ?? 0),
+    top50SupplyPercent: Number(row.top50SupplyPercent ?? 0),
+    concentrationScore: row.concentrationScore ?? 0,
+    holderHealthScore: row.holderHealthScore ?? 0,
+    whaleConfidenceScore: row.whaleConfidenceScore ?? 0,
+    churnRiskScore: row.churnRiskScore ?? 0,
+    distributionRiskScore: row.distributionRiskScore ?? 0,
+    newHolders: row.newHolders,
+    likelyExited: row.likelyExited,
+    churnRate: Number(row.churnRate),
+    scoreBreakdown: Array.isArray(row.scoreBreakdownJson) ? (row.scoreBreakdownJson as TokenSnapshot["scoreBreakdown"]) : []
+  };
+}
+
+function mapPgAlert(row: PgAlertRow): Alert {
+  return {
+    id: row.id,
+    type: row.type,
+    severity: row.severity as Alert["severity"],
+    walletAddress: row.walletAddress ?? undefined,
+    title: row.title,
+    message: row.message,
+    reason: Array.isArray(row.reasonJson) ? row.reasonJson.map(String) : [],
+    nextBestActions: Array.isArray(row.nextBestActionsJson) ? row.nextBestActionsJson.map(String) : [],
+    sourceEndpoints: Array.isArray(row.sourceEndpointsJson) ? (row.sourceEndpointsJson as Alert["sourceEndpoints"]) : ["Token Holder"],
+    confidence: row.confidence,
+    status: row.status as Alert["status"],
+    createdAt: toIso(row.createdAt)
+  };
+}
+
+function mapPgPipelineRun(row: PgPipelineRow): PipelineRun {
+  return {
+    id: row.id,
+    status: row.status as PipelineRun["status"],
+    mode: row.mode as PipelineRun["mode"],
+    apiCallsUsed: row.apiCallsUsed,
+    apiSafeBudget: 50,
+    holdersScanned: row.holdersScanned,
+    walletsEnriched: row.walletsEnriched,
+    cacheHits: row.cacheHits,
+    cacheMisses: row.cacheMisses,
+    durationMs: row.durationMs,
+    rateLimitBudgetUsed: row.rateLimitBudgetUsed,
+    stayedUnderLimit: row.apiCallsUsed <= 50,
+    startedAt: toIso(row.startedAt),
+    completedAt: row.completedAt ? toIso(row.completedAt) : undefined,
+    sources: Array.isArray(row.endpointsUsedJson) ? (row.endpointsUsedJson as PipelineRun["sources"]) : []
+  };
+}
+
+function mapPgApiCallLog(row: PgApiCallLogRow): ApiCallLog {
+  return {
+    id: row.id,
+    runId: row.runId ?? "",
+    endpoint: row.endpoint,
+    tokenId: row.tokenId ?? undefined,
+    walletAddress: row.walletAddress ?? undefined,
+    statusCode: row.statusCode ?? undefined,
+    cacheHit: row.cacheHit,
+    durationMs: row.durationMs ?? 0,
+    errorMessage: row.errorMessage ?? undefined,
+    createdAt: toIso(row.createdAt)
   };
 }
 
@@ -628,19 +1137,10 @@ function emptyPipelineRun(tokenId: string): PipelineRun {
   };
 }
 
-function emptyLiveDataset(token: Token): TokenDataset {
-  return {
-    token,
-    snapshots: [emptySnapshot()],
-    holders: [],
-    previousHolders: [],
-    segments: [],
-    alerts: [],
-    campaigns: [],
-    pipelineRun: emptyPipelineRun(token.id)
-  };
-}
-
 function toIso(value: Date | string) {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function decimal(value: number | null | undefined) {
+  return String(value ?? 0);
 }
