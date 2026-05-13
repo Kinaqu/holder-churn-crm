@@ -1,32 +1,66 @@
-import { redirect } from "next/navigation";
 import { getDemoDataset } from "@/lib/demo/demo-data";
+import { createToken, hasPersistentStore, isDemoTokenMode, listTokens } from "@/lib/db/repository";
+import { normalizeAndValidateTokenInput } from "@/lib/tokens";
 
 export async function GET() {
-  const dataset = getDemoDataset();
-  return Response.json({ tokens: [dataset.token], demo: !process.env.DATABASE_URL });
+  const tokens = await listTokens();
+  return Response.json({ tokens, demo: isDemoTokenMode(), persistent: hasPersistentStore() });
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
-  const chain = String(formData.get("chain") ?? "solana");
-  const address = String(formData.get("address") ?? "");
+  const body = await readTokenRequestBody(request);
+  const validation = normalizeAndValidateTokenInput(body);
 
-  if (!process.env.DATABASE_URL) {
-    redirect(`/tokens/${getDemoDataset().token.id}?demo=1`);
+  if (!validation.ok) {
+    return Response.json(
+      {
+        ok: false,
+        code: validation.code,
+        message: validation.message
+      },
+      { status: 400 }
+    );
   }
 
-  return Response.json(
-    {
-      token: {
-        id: `live-${Date.now()}`,
-        chain,
-        address,
-        symbol: "LIVE",
-        name: "Live Birdeye Token",
-        decimals: 6
-      },
-      note: "Database persistence is intentionally minimal in the MVP. Demo mode remains the judge-ready path."
-    },
-    { status: 201 }
-  );
+  if (isDemoTokenMode()) {
+    return Response.json({
+      ok: true,
+      token: getDemoDataset().token,
+      demo: true,
+      persistent: false,
+      warning: {
+        code: hasPersistentStore() ? "DEMO_MODE_ENABLED" : "DATABASE_NOT_CONFIGURED",
+        message: hasPersistentStore()
+          ? "DEMO_MODE is enabled, so token creation is routed to the deterministic demo token."
+          : "No persistent database is configured. The app is using deterministic demo mode and will not persist this token."
+      }
+    });
+  }
+
+  const token = await createToken({
+    chain: validation.chain,
+    address: validation.address,
+    symbol: safeOptionalString(body.symbol, 16) ?? "LIVE",
+    name: safeOptionalString(body.name, 80) ?? "Live Birdeye Token",
+    decimals: Number.isFinite(Number(body.decimals)) ? Number(body.decimals) : 6
+  });
+
+  return Response.json({ ok: true, token, demo: false, persistent: true }, { status: 201 });
+}
+
+async function readTokenRequestBody(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return (await request.json()) as Record<string, unknown>;
+  }
+
+  const formData = await request.formData();
+  return Object.fromEntries(formData.entries());
+}
+
+function safeOptionalString(value: unknown, maxLength: number) {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  return text.slice(0, maxLength);
 }

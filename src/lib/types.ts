@@ -142,6 +142,8 @@ export type Token = {
   decimals: number;
   securityStatus: "clear" | "caution" | "unknown";
   lastSnapshotAt: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type TokenDataset = {
