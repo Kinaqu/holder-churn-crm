@@ -30,16 +30,26 @@ const tabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
 export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDataset }) {
   const [dataset, setDataset] = useState(initialDataset);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [snapshotMessage, setSnapshotMessage] = useState<string | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const latest = dataset.snapshots.at(-1)!;
 
   const modeLabel = dataset.pipelineRun.mode === "demo" ? "Demo mode: data is deterministic and not persisted" : "Live mode";
 
   function runSnapshot() {
+    setSnapshotMessage(null);
+    setSnapshotError(null);
     startTransition(async () => {
       const response = await fetch(`/api/tokens/${dataset.token.id}/snapshot`, { method: "POST" });
-      const payload = (await response.json()) as { dataset?: TokenDataset };
-      if (payload.dataset) setDataset(payload.dataset);
+      const payload = (await response.json()) as { ok?: boolean; code?: string; message?: string; dataset?: TokenDataset; partial?: boolean };
+      if (!response.ok || payload.ok === false || !payload.dataset) {
+        setSnapshotError(payload.code ? `${payload.code}: ${payload.message ?? "Snapshot failed."}` : "Snapshot failed.");
+        setActiveTab("pipeline");
+        return;
+      }
+      setDataset(payload.dataset);
+      setSnapshotMessage(payload.partial ? "PARTIAL_SNAPSHOT_COMPLETED: Required holder data loaded. One or more optional Birdeye sources were unavailable." : "SNAPSHOT_COMPLETED: Live snapshot completed.");
       setActiveTab("pipeline");
     });
   }
@@ -47,6 +57,8 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-5 rounded-lg border border-signal-cyan/25 bg-signal-cyan/10 px-4 py-3 text-sm text-signal-cyan">{modeLabel}</div>
+      {snapshotError ? <div className="mb-5 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">{snapshotError}</div> : null}
+      {snapshotMessage ? <div className="mb-5 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">{snapshotMessage}</div> : null}
       <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
         <div>
           <div className="flex flex-wrap items-center gap-3">

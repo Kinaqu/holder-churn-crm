@@ -13,7 +13,9 @@ export const demoToken: Token = {
   name: "Birdeye CRM Demo",
   decimals: 6,
   securityStatus: "clear",
-  lastSnapshotAt: now
+  lastSnapshotAt: now,
+  createdAt: "2026-05-08T16:42:00.000Z",
+  updatedAt: now
 };
 
 export const previousDemoHolders: HolderSnapshot[] = [

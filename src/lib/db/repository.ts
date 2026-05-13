@@ -1,7 +1,11 @@
 import "server-only";
 
+import { and, eq } from "drizzle-orm";
+import { getDb, hasDatabase } from "@/lib/db/client";
 import { d1Batch, d1Query, hasD1 } from "@/lib/db/d1-client";
+import { tokens } from "@/lib/db/schema";
 import { getDemoDataset } from "@/lib/demo/demo-data";
+import { createStableTokenId } from "@/lib/tokens";
 import type { Alert, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
 type TokenRow = {
@@ -101,17 +105,34 @@ type PipelineRow = {
 };
 
 export function hasPersistentStore() {
-  return hasD1();
+  return hasDatabase() || hasD1();
+}
+
+export function isDemoTokenMode() {
+  return process.env.DEMO_MODE === "true" || !hasPersistentStore();
 }
 
 export async function listTokens(): Promise<Token[]> {
-  if (!hasD1()) return [getDemoDataset().token];
+  if (isDemoTokenMode()) return [getDemoDataset().token];
+
+  if (hasDatabase()) {
+    const rows = await getDb().select().from(tokens).orderBy(tokens.updatedAt).limit(100);
+    return rows.map(mapPgToken).reverse();
+  }
+
   const result = await d1Query<TokenRow>("SELECT * FROM tokens ORDER BY updated_at DESC LIMIT 100");
   return result.results?.map(mapToken) ?? [];
 }
 
 export async function getToken(id: string): Promise<Token | null> {
-  if (!hasD1()) return id === getDemoDataset().token.id ? getDemoDataset().token : null;
+  if (id === getDemoDataset().token.id) return getDemoDataset().token;
+  if (isDemoTokenMode()) return id === getDemoDataset().token.id ? getDemoDataset().token : null;
+
+  if (hasDatabase()) {
+    const rows = await getDb().select().from(tokens).where(eq(tokens.id, id)).limit(1);
+    return rows[0] ? mapPgToken(rows[0]) : null;
+  }
+
   const result = await d1Query<TokenRow>("SELECT * FROM tokens WHERE id = ? LIMIT 1", [id]);
   const row = result.results?.[0];
   return row ? mapToken(row) : null;
@@ -119,7 +140,7 @@ export async function getToken(id: string): Promise<Token | null> {
 
 export async function createToken(input: { chain: string; address: string; symbol?: string; name?: string; decimals?: number }) {
   const now = new Date().toISOString();
-  const id = `${input.chain}-${input.address.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24)}-${Date.now().toString(36)}`;
+  const id = createStableTokenId(input.chain, input.address);
   const token: Token = {
     id,
     chain: input.chain,
@@ -128,10 +149,42 @@ export async function createToken(input: { chain: string; address: string; symbo
     name: input.name || "Live Birdeye Token",
     decimals: input.decimals ?? 6,
     securityStatus: "unknown",
-    lastSnapshotAt: now
+    lastSnapshotAt: now,
+    createdAt: now,
+    updatedAt: now
   };
 
-  if (!hasD1()) return token;
+  if (!hasPersistentStore()) return token;
+
+  if (hasDatabase()) {
+    const existing = await getDb()
+      .select()
+      .from(tokens)
+      .where(and(eq(tokens.chain, token.chain), eq(tokens.address, token.address)))
+      .limit(1);
+
+    if (existing[0]) return mapPgToken(existing[0]);
+
+    const inserted = await getDb()
+      .insert(tokens)
+      .values({
+        id: token.id,
+        chain: token.chain,
+        address: token.address,
+        symbol: token.symbol,
+        name: token.name,
+        decimals: token.decimals,
+        securityStatus: token.securityStatus,
+        createdAt: new Date(now),
+        updatedAt: new Date(now)
+      })
+      .returning();
+
+    return inserted[0] ? mapPgToken(inserted[0]) : token;
+  }
+
+  const existing = await d1Query<TokenRow>("SELECT * FROM tokens WHERE chain = ? AND address = ? LIMIT 1", [token.chain, token.address]);
+  if (existing.results?.[0]) return mapToken(existing.results[0]);
 
   await d1Query(
     `INSERT INTO tokens (id, chain, address, symbol, name, decimals, security_status, created_at, updated_at)
@@ -143,7 +196,9 @@ export async function createToken(input: { chain: string; address: string; symbo
 }
 
 export async function getLatestHolderSnapshots(tokenId: string): Promise<HolderSnapshot[]> {
-  if (!hasD1()) return getDemoDataset().previousHolders;
+  if (!hasPersistentStore()) return [];
+
+  if (hasDatabase()) return [];
 
   const latest = await d1Query<{ snapshot_at: string }>(
     "SELECT snapshot_at FROM holder_snapshots WHERE token_id = ? GROUP BY snapshot_at ORDER BY snapshot_at DESC LIMIT 1",
@@ -161,11 +216,16 @@ export async function getLatestHolderSnapshots(tokenId: string): Promise<HolderS
   return rows.results?.map(mapHolder) ?? [];
 }
 
-export async function getTokenDataset(tokenId: string): Promise<TokenDataset> {
-  if (!hasD1() || tokenId === getDemoDataset().token.id) return getDemoDataset();
+export async function getTokenDataset(tokenId: string): Promise<TokenDataset | null> {
+  if (tokenId === getDemoDataset().token.id) return getDemoDataset();
+  if (!hasPersistentStore()) return null;
 
   const token = await getToken(tokenId);
-  if (!token) return getDemoDataset();
+  if (!token) return null;
+
+  if (hasDatabase()) {
+    return emptyLiveDataset(token);
+  }
 
   const [snapshots, holders, segments, alerts, campaigns, pipelineRun] = await Promise.all([
     getTokenSnapshots(tokenId),
@@ -186,6 +246,12 @@ export async function getTokenDataset(tokenId: string): Promise<TokenDataset> {
     campaigns,
     pipelineRun: pipelineRun ?? emptyPipelineRun(tokenId)
   };
+}
+
+export async function getStoredTokenSnapshots(tokenId: string): Promise<TokenSnapshot[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) return [];
+  return getTokenSnapshots(tokenId);
 }
 
 export async function saveSnapshotDataset(dataset: TokenDataset) {
@@ -391,7 +457,27 @@ function mapToken(row: TokenRow): Token {
     name: row.name,
     decimals: row.decimals,
     securityStatus: row.security_status,
-    lastSnapshotAt: row.updated_at
+    lastSnapshotAt: row.updated_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+type PgTokenRow = typeof tokens.$inferSelect;
+
+function mapPgToken(row: PgTokenRow): Token {
+  const updatedAt = toIso(row.updatedAt);
+  return {
+    id: row.id,
+    chain: row.chain,
+    address: row.address,
+    symbol: row.symbol,
+    name: row.name,
+    decimals: row.decimals,
+    securityStatus: row.securityStatus as Token["securityStatus"],
+    lastSnapshotAt: updatedAt,
+    createdAt: toIso(row.createdAt),
+    updatedAt
   };
 }
 
@@ -540,4 +626,21 @@ function emptyPipelineRun(tokenId: string): PipelineRun {
       { source: "Token Transfer", status: "skipped", detail: "Waiting for snapshot.", calls: 0 }
     ]
   };
+}
+
+function emptyLiveDataset(token: Token): TokenDataset {
+  return {
+    token,
+    snapshots: [emptySnapshot()],
+    holders: [],
+    previousHolders: [],
+    segments: [],
+    alerts: [],
+    campaigns: [],
+    pipelineRun: emptyPipelineRun(token.id)
+  };
+}
+
+function toIso(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
 }

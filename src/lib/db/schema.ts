@@ -1,11 +1,12 @@
 import { index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 export const tokens = pgTable("tokens", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: text("id").primaryKey(),
   chain: text("chain").notNull(),
   address: text("address").notNull(),
   symbol: text("symbol").notNull(),
   name: text("name").notNull(),
+  securityStatus: text("security_status").default("unknown").notNull(),
   decimals: integer("decimals").default(6).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
@@ -15,7 +16,7 @@ export const holderSnapshots = pgTable(
   "holder_snapshots",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    tokenId: uuid("token_id").notNull(),
+    tokenId: text("token_id").notNull(),
     walletAddress: text("wallet_address").notNull(),
     balance: numeric("balance").notNull(),
     balanceUsd: numeric("balance_usd"),
@@ -32,7 +33,7 @@ export const holderSnapshots = pgTable(
 
 export const holderSegments = pgTable("holder_segments", {
   id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: uuid("token_id").notNull(),
+  tokenId: text("token_id").notNull(),
   walletAddress: text("wallet_address").notNull(),
   segment: text("segment").notNull(),
   previousBalance: numeric("previous_balance"),
@@ -48,7 +49,7 @@ export const holderSegments = pgTable("holder_segments", {
 
 export const tokenSnapshots = pgTable("token_snapshots", {
   id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: uuid("token_id").notNull(),
+  tokenId: text("token_id").notNull(),
   priceUsd: numeric("price_usd"),
   priceChange24h: numeric("price_change_24h"),
   holderCount: integer("holder_count"),
@@ -65,7 +66,7 @@ export const tokenSnapshots = pgTable("token_snapshots", {
 
 export const alerts = pgTable("alerts", {
   id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: uuid("token_id").notNull(),
+  tokenId: text("token_id").notNull(),
   type: text("type").notNull(),
   severity: text("severity").notNull(),
   walletAddress: text("wallet_address"),
@@ -81,7 +82,7 @@ export const alerts = pgTable("alerts", {
 
 export const campaignMarkers = pgTable("campaign_markers", {
   id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: uuid("token_id").notNull(),
+  tokenId: text("token_id").notNull(),
   name: text("name").notNull(),
   description: text("description"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
@@ -91,7 +92,7 @@ export const campaignMarkers = pgTable("campaign_markers", {
 
 export const pipelineRuns = pgTable("pipeline_runs", {
   id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: uuid("token_id"),
+  tokenId: text("token_id"),
   status: text("status").notNull(),
   mode: text("mode").notNull(),
   apiCallsUsed: integer("api_calls_used").notNull(),
@@ -111,7 +112,7 @@ export const apiCallLogs = pgTable("api_call_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   runId: text("run_id"),
   endpoint: text("endpoint").notNull(),
-  tokenId: uuid("token_id"),
+  tokenId: text("token_id"),
   walletAddress: text("wallet_address"),
   statusCode: integer("status_code"),
   cacheHit: text("cache_hit").notNull(),

@@ -4,21 +4,47 @@ import { normalizeHolders } from "@/lib/birdeye/normalizers";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 import { calculateSnapshotScores } from "@/lib/intelligence/scoring";
 import { generateAlerts } from "@/lib/intelligence/alerts";
-import type { PipelineRun, TokenDataset } from "@/lib/types";
+import type { HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
-export async function runManualSnapshot(input: { tokenId?: string; chain?: string; address?: string }): Promise<TokenDataset> {
-  if (isDemoMode()) {
+export class SnapshotError extends Error {
+  constructor(
+    readonly code: "INVALID_TOKEN_ADDRESS" | "BIRDEYE_API_KEY_MISSING" | "SNAPSHOT_FAILED",
+    message: string,
+    readonly status = 400
+  ) {
+    super(message);
+  }
+}
+
+export async function runManualSnapshot(input: {
+  tokenId: string;
+  chain: string;
+  address: string;
+  token?: Token;
+  mode?: "demo" | "live";
+  previousHolders?: HolderSnapshot[];
+  previousSnapshots?: TokenSnapshot[];
+}): Promise<TokenDataset> {
+  if (input.mode === "demo") {
     return getDemoDataset();
   }
 
   const startedAt = new Date();
   const client = getBirdeyeClient();
-  const chain = input.chain ?? "solana";
-  const address = input.address ?? "";
+  const chain = input.chain;
+  const address = input.address;
+
+  if (!address) {
+    throw new SnapshotError("INVALID_TOKEN_ADDRESS", "Live snapshot requires a token address.");
+  }
+
+  if (!process.env.BIRDEYE_API_KEY) {
+    throw new SnapshotError("BIRDEYE_API_KEY_MISSING", "BIRDEYE_API_KEY is required to run a live Birdeye snapshot.", 503);
+  }
 
   const holdersResult = await client.getTokenHolders(chain, address, 100);
   if (!holdersResult.ok) {
-    throw new Error("Token Holder is required for a live snapshot.");
+    throw new SnapshotError("SNAPSHOT_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502);
   }
 
   const [distribution, price, security, transfers] = await Promise.all([
@@ -29,7 +55,8 @@ export async function runManualSnapshot(input: { tokenId?: string; chain?: strin
   ]);
 
   const holders = normalizeHolders(holdersResult.data);
-  const previousHolders = getDemoDataset().previousHolders;
+  const previousHolders = input.previousHolders ?? [];
+  const previousSnapshots = input.previousSnapshots ?? [];
   const segments = classifyHolderSegments(previousHolders, holders);
   const currentSnapshot = calculateSnapshotScores({
     previousTrackedWallets: previousHolders.length,
@@ -68,25 +95,27 @@ export async function runManualSnapshot(input: { tokenId?: string; chain?: strin
 
   return {
     token: {
-      id: input.tokenId ?? "live-token",
+      id: input.tokenId,
       chain,
       address,
-      symbol: "LIVE",
-      name: "Live Birdeye Token",
-      decimals: 6,
+      symbol: input.token?.symbol ?? "LIVE",
+      name: input.token?.name ?? "Live Birdeye Token",
+      decimals: input.token?.decimals ?? 6,
       securityStatus: security.ok ? "clear" : "unknown",
-      lastSnapshotAt: currentSnapshot.snapshotAt
+      lastSnapshotAt: currentSnapshot.snapshotAt,
+      createdAt: input.token?.createdAt,
+      updatedAt: currentSnapshot.snapshotAt
     },
-    snapshots: [...getDemoDataset().snapshots.slice(0, -1), currentSnapshot],
+    snapshots: [...previousSnapshots, currentSnapshot],
     holders,
     previousHolders,
     segments,
-    alerts: generateAlerts(segments, currentSnapshot, getDemoDataset().snapshots.at(-1)),
-    campaigns: getDemoDataset().campaigns,
+    alerts: generateAlerts(segments, currentSnapshot, previousSnapshots.at(-1)),
+    campaigns: [],
     pipelineRun
   };
 }
 
 export function isDemoMode() {
-  return process.env.DEMO_MODE === "true" || !process.env.DATABASE_URL || !process.env.BIRDEYE_API_KEY;
+  return process.env.DEMO_MODE === "true";
 }
