@@ -28,6 +28,8 @@ export type BirdeyeSource =
   | "Holder Positions";
 
 export type HolderSnapshot = {
+  id?: string;
+  sourceRunId?: string;
   walletAddress: string;
   balance: number;
   balanceUsd: number;
@@ -99,6 +101,8 @@ export type PipelineRun = {
 };
 
 export type TokenSnapshot = {
+  id?: string;
+  sourceRunId?: string;
   snapshotAt: string;
   priceUsd: number;
   priceChange24h: number;
@@ -118,19 +122,41 @@ export type TokenSnapshot = {
 
 export type CampaignMarker = {
   id: string;
+  tokenId: string;
   name: string;
   description: string;
   startedAt: string;
   endedAt?: string;
+  createdAt: string;
   mode: "demo" | "live";
-  newHolders: number;
+  newHolders?: number;
   retained24h?: number;
   retained7d?: number;
-  likelyExited: number;
-  whaleEntries: number;
-  holderQualityChange: number;
+  likelyExited?: number;
+  whaleEntries?: number;
+  holderQualityChange?: number;
   impactScore?: number;
+  status?: "complete" | "needs_more_snapshots" | "preview";
+};
+
+export type CampaignImpactMetrics = {
+  newHolders: number;
+  likelyExited: number;
+  retainedHolders: number;
+  retained24h?: number;
+  retained7d?: number;
+  whaleEntries: number;
+  whaleReduced: number;
+  holderQualityChange: number;
+  campaignImpactScore?: number;
+};
+
+export type CampaignImpact = {
+  campaign: CampaignMarker;
   status: "complete" | "needs_more_snapshots" | "preview";
+  metrics: CampaignImpactMetrics;
+  missingRequirements: string[];
+  sourceSnapshotIds: string[];
 };
 
 export type Token = {
@@ -154,8 +180,9 @@ export type TokenDataset = {
   previousHolders: HolderSnapshot[];
   segments: HolderSegment[];
   alerts: Alert[];
-  campaigns: CampaignMarker[];
+  campaigns: CampaignImpact[];
   pipelineRun: PipelineRun;
+  pipelineRuns?: PipelineRun[];
   apiCallLogs?: ApiCallLog[];
 };
 

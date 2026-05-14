@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { AlertTriangle, BarChart3, Bell, Copy, Database, Play, Settings, Target, Users } from "lucide-react";
-import type { TokenDataset } from "@/lib/types";
+import type { CampaignImpact, TokenDataset } from "@/lib/types";
 import { AlertList } from "@/components/alert-list";
 import { ChurnChart, DistributionChart, HealthVsPriceChart, HolderTrendChart, WhaleConfidenceChart } from "@/components/charts/product-charts";
 import { DataLimitationsNotice } from "@/components/data-limitations-notice";
@@ -115,7 +115,7 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
         {activeTab === "overview" ? <Overview dataset={dataset} /> : null}
         {activeTab === "holders" ? <Holders dataset={dataset} /> : null}
         {activeTab === "alerts" ? <Alerts dataset={dataset} /> : null}
-        {activeTab === "campaigns" ? <Campaigns dataset={dataset} /> : null}
+        {activeTab === "campaigns" ? <Campaigns dataset={dataset} onDatasetChange={setDataset} /> : null}
         {activeTab === "pipeline" ? <Pipeline dataset={dataset} /> : null}
         {activeTab === "settings" ? <SettingsTab /> : null}
       </div>
@@ -174,7 +174,40 @@ function Alerts({ dataset }: { dataset: TokenDataset }) {
   );
 }
 
-function Campaigns({ dataset }: { dataset: TokenDataset }) {
+function Campaigns({ dataset, onDatasetChange }: { dataset: TokenDataset; onDatasetChange: (dataset: TokenDataset) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [startedAt, setStartedAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [endedAt, setEndedAt] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isSaving, startSaving] = useTransition();
+
+  function createMarker() {
+    setMessage(null);
+    startSaving(async () => {
+      const response = await fetch(`/api/tokens/${dataset.token.id}/campaigns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description,
+          startedAt: localDateTimeToIso(startedAt),
+          endedAt: endedAt ? localDateTimeToIso(endedAt) : undefined
+        })
+      });
+      const payload = (await response.json()) as { ok?: boolean; code?: string; message?: string; campaigns?: CampaignImpact[] };
+      if (!response.ok || payload.ok === false || !payload.campaigns) {
+        setMessage(payload.code ? `${payload.code}: ${payload.message ?? "Campaign marker was not saved."}` : "Campaign marker was not saved.");
+        return;
+      }
+      onDatasetChange({ ...dataset, campaigns: payload.campaigns });
+      setName("");
+      setDescription("");
+      setEndedAt("");
+      setMessage("Campaign marker saved. Impact updates as more snapshots are collected.");
+    });
+  }
+
   return (
     <section className="panel rounded-lg p-5">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
@@ -182,26 +215,60 @@ function Campaigns({ dataset }: { dataset: TokenDataset }) {
           <h2 className="text-xl font-semibold text-white">Campaign Impact</h2>
           <p className="mt-1 text-sm text-slate-400">Measure campaign quality by retained holders, not vanity impressions.</p>
         </div>
-        <button className="rounded-md bg-white px-3 py-2 text-sm font-medium text-graphite-950">Create marker</button>
       </div>
+      {dataset.pipelineRun.mode === "live" ? (
+        <div className="mt-5 grid gap-3 rounded-lg border border-white/10 bg-white/[0.03] p-4 lg:grid-cols-[1fr_1fr_1fr_auto]">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Campaign name"
+            className="rounded-md border border-white/10 bg-graphite-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-signal-cyan"
+          />
+          <input
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Description"
+            className="rounded-md border border-white/10 bg-graphite-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-signal-cyan"
+          />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+            <input
+              type="datetime-local"
+              value={startedAt}
+              onChange={(event) => setStartedAt(event.target.value)}
+              className="rounded-md border border-white/10 bg-graphite-950 px-3 py-2 text-sm text-white outline-none transition focus:border-signal-cyan"
+            />
+            <input
+              type="datetime-local"
+              value={endedAt}
+              onChange={(event) => setEndedAt(event.target.value)}
+              className="rounded-md border border-white/10 bg-graphite-950 px-3 py-2 text-sm text-white outline-none transition focus:border-signal-cyan"
+            />
+          </div>
+          <button onClick={createMarker} disabled={isSaving || !name || !startedAt} className="rounded-md bg-white px-3 py-2 text-sm font-medium text-graphite-950 disabled:cursor-not-allowed disabled:opacity-60">
+            {isSaving ? "Saving..." : "Create marker"}
+          </button>
+        </div>
+      ) : null}
+      {message ? <div className="mt-4 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">{message}</div> : null}
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        {dataset.campaigns.map((campaign) => (
-          <article key={campaign.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+        {dataset.campaigns.map((impact) => (
+          <article key={impact.campaign.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-semibold text-white">{campaign.name}</h3>
-                <p className="mt-1 text-sm text-slate-400">{campaign.description}</p>
+                <h3 className="font-semibold text-white">{impact.campaign.name}</h3>
+                <p className="mt-1 text-sm text-slate-400">{impact.campaign.description}</p>
               </div>
-              <span className={cn("rounded-full border px-2 py-1 text-xs", campaign.status === "complete" ? "border-signal-green/30 bg-signal-green/10 text-signal-green" : "border-signal-amber/30 bg-signal-amber/10 text-signal-amber")}>
-                {campaign.status === "needs_more_snapshots" ? "Needs more snapshots" : campaign.status}
+              <span className={cn("rounded-full border px-2 py-1 text-xs", impact.status === "complete" ? "border-signal-green/30 bg-signal-green/10 text-signal-green" : "border-signal-amber/30 bg-signal-amber/10 text-signal-amber")}>
+                {impact.status === "needs_more_snapshots" ? "Needs more snapshots" : impact.status}
               </span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-              <CampaignStat label="New holders" value={campaign.newHolders} />
-              <CampaignStat label="Likely exited" value={campaign.likelyExited} />
-              <CampaignStat label="Retained 24h" value={campaign.retained24h ?? "Pending"} />
-              <CampaignStat label="Impact score" value={campaign.impactScore ?? "Preview"} />
+              <CampaignStat label="New holders" value={impact.metrics.newHolders} />
+              <CampaignStat label="Likely exited" value={impact.metrics.likelyExited} />
+              <CampaignStat label="Retained 24h" value={impact.metrics.retained24h ?? "Pending"} />
+              <CampaignStat label="Impact score" value={impact.metrics.campaignImpactScore ?? "Preview"} />
             </div>
+            {impact.missingRequirements.length > 0 ? <p className="mt-3 text-sm text-slate-400">{impact.missingRequirements[0]}</p> : null}
           </article>
         ))}
       </div>
@@ -249,8 +316,39 @@ function Pipeline({ dataset }: { dataset: TokenDataset }) {
           </table>
         </div>
       </section>
+      {dataset.pipelineRuns && dataset.pipelineRuns.length > 1 ? (
+        <section className="panel rounded-lg p-5">
+          <h2 className="text-xl font-semibold text-white">Pipeline History</h2>
+          <div className="mt-4 overflow-hidden rounded-lg border border-white/10">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="bg-white/[0.04] text-xs uppercase tracking-[0.16em] text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Run</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Started</th>
+                  <th className="px-4 py-3">Calls</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {dataset.pipelineRuns.slice(0, 8).map((run) => (
+                  <tr key={run.id}>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-300">{run.id.slice(0, 12)}</td>
+                    <td className="px-4 py-3 capitalize text-slate-300">{run.status}</td>
+                    <td className="px-4 py-3 text-slate-400">{relativeTimeLabel(run.startedAt)}</td>
+                    <td className="px-4 py-3 font-mono text-slate-300">{run.apiCallsUsed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
+}
+
+function localDateTimeToIso(value: string) {
+  return new Date(value).toISOString();
 }
 
 function SettingsTab() {

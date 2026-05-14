@@ -3,10 +3,11 @@ import "server-only";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/lib/db/client";
 import { d1Batch, d1Query, hasD1 } from "@/lib/db/d1-client";
-import { alerts, apiCallLogs, holderSegments, holderSnapshots, pipelineRuns, tokenSnapshots, tokens } from "@/lib/db/schema";
+import { alerts, apiCallLogs, campaignMarkers, holderSegments, holderSnapshots, pipelineRuns, tokenSnapshots, tokens } from "@/lib/db/schema";
 import { getDemoDataset } from "@/lib/demo/demo-data";
 import { createStableTokenId } from "@/lib/tokens";
-import type { Alert, ApiCallLog, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
+import { classifyHolderSegments } from "@/lib/intelligence/segments";
+import type { Alert, ApiCallLog, CampaignImpact, CampaignImpactMetrics, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
 type TokenRow = {
   id: string;
@@ -21,6 +22,7 @@ type TokenRow = {
 };
 
 type HolderRow = {
+  id?: string;
   wallet_address: string;
   balance: number;
   balance_usd: number;
@@ -28,6 +30,7 @@ type HolderRow = {
   holder_rank: number;
   snapshot_at: string;
   source_endpoint: string;
+  source_run_id?: string;
 };
 
 type SegmentRow = {
@@ -80,6 +83,7 @@ type AlertRow = {
 
 type CampaignRow = {
   id: string;
+  token_id: string;
   name: string;
   description: string;
   started_at: string;
@@ -122,6 +126,16 @@ export async function listTokens(): Promise<Token[]> {
 
   const result = await d1Query<TokenRow>("SELECT * FROM tokens ORDER BY updated_at DESC LIMIT 100");
   return result.results?.map(mapToken) ?? [];
+}
+
+export async function listLiveTokensForSnapshotBatch(limit = 3): Promise<Token[]> {
+  if (!hasDatabase()) return [];
+  const rows = await getDb()
+    .select()
+    .from(tokens)
+    .orderBy(tokens.updatedAt)
+    .limit(Math.max(1, Math.min(3, limit)));
+  return rows.map(mapPgToken);
 }
 
 export async function getToken(id: string): Promise<Token | null> {
@@ -300,13 +314,16 @@ export async function getTokenDataset(tokenId: string): Promise<TokenDataset | n
   if (!token) return null;
 
   if (hasDatabase()) {
-    const [snapshots, holders, segments, alerts, pipelineRun] = await Promise.all([
+    const [snapshots, holders, segments, alerts, pipelineRun, pipelineRuns, campaignImpacts] = await Promise.all([
       getTokenSnapshotHistory(tokenId),
       getLatestHolderSnapshots(tokenId),
       getLatestHolderSegments(tokenId),
       getAlertsByToken(tokenId),
-      getLatestPipelineRun(tokenId)
+      getLatestPipelineRun(tokenId),
+      getPipelineRunsByToken(tokenId),
+      getCampaignImpactsByToken(tokenId)
     ]);
+    const apiCallLogs = pipelineRun ? await getApiCallLogsByRun(pipelineRun.id) : [];
 
     return {
       token: { ...token, lastSnapshotAt: snapshots.at(-1)?.snapshotAt ?? token.lastSnapshotAt },
@@ -315,8 +332,10 @@ export async function getTokenDataset(tokenId: string): Promise<TokenDataset | n
       previousHolders: [],
       segments,
       alerts,
-      campaigns: [],
-      pipelineRun: pipelineRun ?? emptyPipelineRun(tokenId)
+      campaigns: campaignImpacts,
+      pipelineRun: pipelineRun ?? emptyPipelineRun(tokenId),
+      pipelineRuns,
+      apiCallLogs
     };
   }
 
@@ -364,6 +383,49 @@ export async function getTokenSnapshotHistory(tokenId: string): Promise<TokenSna
 export async function getLatestTokenSnapshot(tokenId: string): Promise<TokenSnapshot | null> {
   const snapshots = await getTokenSnapshotHistory(tokenId);
   return snapshots.at(-1) ?? null;
+}
+
+export async function getCampaignMarkersByToken(tokenId: string): Promise<CampaignMarker[]> {
+  if (!hasPersistentStore()) return [];
+  if (hasDatabase()) {
+    const rows = await getDb()
+      .select()
+      .from(campaignMarkers)
+      .where(eq(campaignMarkers.tokenId, tokenId))
+      .orderBy(desc(campaignMarkers.startedAt))
+      .limit(50);
+    return rows.map(mapPgCampaign);
+  }
+  return getCampaigns(tokenId).then((items) => items.map((impact) => impact.campaign));
+}
+
+export async function getCampaignImpactsByToken(tokenId: string): Promise<CampaignImpact[]> {
+  if (!hasPersistentStore()) return [];
+  const campaigns = await getCampaignMarkersByToken(tokenId);
+  if (campaigns.length === 0) return [];
+  const [snapshots, holders] = await Promise.all([getTokenSnapshotHistory(tokenId), getHolderSnapshotHistory(tokenId)]);
+  return campaigns.map((campaign) => calculateCampaignImpact(campaign, snapshots, holders));
+}
+
+export async function createCampaign(tokenId: string, input: { name: string; description?: string; startedAt: string; endedAt?: string | null }) {
+  if (!hasDatabase()) {
+    throw new RepositoryError("DATABASE_NOT_CONFIGURED", "DATABASE_URL is required to save live campaign markers.", 503);
+  }
+
+  const now = new Date().toISOString();
+  const inserted = await getDb()
+    .insert(campaignMarkers)
+    .values({
+      tokenId,
+      name: input.name,
+      description: input.description ?? "",
+      startedAt: new Date(input.startedAt),
+      endedAt: input.endedAt ? new Date(input.endedAt) : null,
+      createdAt: new Date(now)
+    })
+    .returning();
+
+  return inserted[0] ? mapPgCampaign(inserted[0]) : null;
 }
 
 export async function getLatestHolderSegments(tokenId: string): Promise<HolderSegment[]> {
@@ -815,33 +877,6 @@ export async function saveSnapshotDataset(dataset: TokenDataset) {
   await d1Batch(batch);
 }
 
-export async function createCampaign(tokenId: string, input: { name: string; description?: string; startedAt?: string; endedAt?: string | null }) {
-  const now = new Date().toISOString();
-  const campaign: CampaignMarker = {
-    id: crypto.randomUUID(),
-    name: input.name,
-    description: input.description ?? "",
-    startedAt: input.startedAt ?? now,
-    endedAt: input.endedAt ?? undefined,
-    mode: hasD1() ? "live" : "demo",
-    newHolders: 0,
-    likelyExited: 0,
-    whaleEntries: 0,
-    holderQualityChange: 0,
-    status: "needs_more_snapshots"
-  };
-
-  if (hasD1()) {
-    await d1Query(
-      `INSERT INTO campaign_markers (id, token_id, name, description, started_at, ended_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [campaign.id, tokenId, campaign.name, campaign.description, campaign.startedAt, campaign.endedAt ?? null, now]
-    );
-  }
-
-  return campaign;
-}
-
 async function getTokenSnapshots(tokenId: string): Promise<TokenSnapshot[]> {
   const rows = await d1Query<SnapshotRow>(
     `SELECT * FROM token_snapshots WHERE token_id = ? ORDER BY snapshot_at ASC LIMIT 30`,
@@ -870,9 +905,9 @@ async function getAlerts(tokenId: string): Promise<Alert[]> {
   return rows.results?.map(mapAlert) ?? [];
 }
 
-async function getCampaigns(tokenId: string): Promise<CampaignMarker[]> {
+async function getCampaigns(tokenId: string): Promise<CampaignImpact[]> {
   const rows = await d1Query<CampaignRow>("SELECT * FROM campaign_markers WHERE token_id = ? ORDER BY started_at DESC LIMIT 50", [tokenId]);
-  return rows.results?.map(mapCampaign) ?? [];
+  return rows.results?.map((row) => calculateCampaignImpact(mapCampaign(row), [], [])) ?? [];
 }
 
 function mapToken(row: TokenRow): Token {
@@ -895,6 +930,7 @@ type PgHolderRow = typeof holderSnapshots.$inferSelect;
 type PgSegmentRow = typeof holderSegments.$inferSelect;
 type PgSnapshotRow = typeof tokenSnapshots.$inferSelect;
 type PgAlertRow = typeof alerts.$inferSelect;
+type PgCampaignRow = typeof campaignMarkers.$inferSelect;
 type PgPipelineRow = typeof pipelineRuns.$inferSelect;
 type PgApiCallLogRow = typeof apiCallLogs.$inferSelect;
 
@@ -916,6 +952,8 @@ function mapPgToken(row: PgTokenRow): Token {
 
 function mapPgHolder(row: PgHolderRow): HolderSnapshot {
   return {
+    id: row.id,
+    sourceRunId: row.sourceRunId ?? undefined,
     walletAddress: row.walletAddress,
     balance: Number(row.balance),
     balanceUsd: Number(row.balanceUsd ?? 0),
@@ -945,6 +983,8 @@ function mapPgSegment(row: PgSegmentRow): HolderSegment {
 
 function mapPgSnapshot(row: PgSnapshotRow): TokenSnapshot {
   return {
+    id: row.id,
+    sourceRunId: row.sourceRunId,
     snapshotAt: toIso(row.snapshotAt),
     priceUsd: Number(row.priceUsd ?? 0),
     priceChange24h: Number(row.priceChange24h ?? 0),
@@ -960,6 +1000,19 @@ function mapPgSnapshot(row: PgSnapshotRow): TokenSnapshot {
     likelyExited: row.likelyExited,
     churnRate: Number(row.churnRate),
     scoreBreakdown: Array.isArray(row.scoreBreakdownJson) ? (row.scoreBreakdownJson as TokenSnapshot["scoreBreakdown"]) : []
+  };
+}
+
+function mapPgCampaign(row: PgCampaignRow): CampaignMarker {
+  return {
+    id: row.id,
+    tokenId: row.tokenId,
+    name: row.name,
+    description: row.description ?? "",
+    startedAt: toIso(row.startedAt),
+    endedAt: row.endedAt ? toIso(row.endedAt) : undefined,
+    createdAt: toIso(row.createdAt),
+    mode: "live"
   };
 }
 
@@ -1017,6 +1070,8 @@ function mapPgApiCallLog(row: PgApiCallLogRow): ApiCallLog {
 
 function mapHolder(row: HolderRow): HolderSnapshot {
   return {
+    id: row.id,
+    sourceRunId: row.source_run_id,
     walletAddress: row.wallet_address,
     balance: Number(row.balance),
     balanceUsd: Number(row.balance_usd),
@@ -1029,6 +1084,7 @@ function mapHolder(row: HolderRow): HolderSnapshot {
 
 function mapSnapshot(row: SnapshotRow): TokenSnapshot {
   return {
+    id: "id" in row ? String(row.id) : undefined,
     snapshotAt: row.snapshot_at,
     priceUsd: Number(row.price_usd),
     priceChange24h: Number(row.price_change_24h),
@@ -1084,15 +1140,13 @@ function mapAlert(row: AlertRow): Alert {
 function mapCampaign(row: CampaignRow): CampaignMarker {
   return {
     id: row.id,
+    tokenId: row.token_id,
     name: row.name,
     description: row.description,
     startedAt: row.started_at,
     endedAt: row.ended_at ?? undefined,
+    createdAt: row.created_at,
     mode: "live",
-    newHolders: 0,
-    likelyExited: 0,
-    whaleEntries: 0,
-    holderQualityChange: 0,
     status: "needs_more_snapshots"
   };
 }
@@ -1172,10 +1226,132 @@ function decimal(value: number | null | undefined) {
 
 export class RepositoryError extends Error {
   constructor(
-    readonly code: "PERSISTENCE_WRITE_FAILED",
+    readonly code: "PERSISTENCE_WRITE_FAILED" | "DATABASE_NOT_CONFIGURED",
     message: string,
     readonly status = 500
   ) {
     super(message);
   }
+}
+
+function calculateCampaignImpact(campaign: CampaignMarker, snapshots: TokenSnapshot[], holderHistory: HolderSnapshot[]): CampaignImpact {
+  const startedAt = new Date(campaign.startedAt);
+  const endedAt = campaign.endedAt ? new Date(campaign.endedAt) : undefined;
+  const targetAt = endedAt ?? startedAt;
+  const snapshotGroups = groupHoldersBySnapshot(holderHistory);
+  const beforeGroup = [...snapshotGroups].reverse().find((group) => new Date(group.snapshotAt).getTime() < startedAt.getTime());
+  const afterGroup =
+    snapshotGroups.find((group) => new Date(group.snapshotAt).getTime() >= targetAt.getTime()) ??
+    snapshotGroups.find((group) => new Date(group.snapshotAt).getTime() > startedAt.getTime());
+  const beforeToken = findNearestSnapshotBefore(snapshots, startedAt);
+  const afterToken = findNearestSnapshotAfter(snapshots, targetAt) ?? findNearestSnapshotAfter(snapshots, startedAt);
+  const missingRequirements: string[] = [];
+
+  if (!beforeGroup) missingRequirements.push("Needs a holder snapshot before campaign start.");
+  if (!afterGroup) missingRequirements.push("Needs a holder snapshot after campaign start or end.");
+
+  if (!beforeGroup || !afterGroup) {
+    return {
+      campaign,
+      status: "needs_more_snapshots",
+      metrics: emptyCampaignMetrics(),
+      missingRequirements,
+      sourceSnapshotIds: []
+    };
+  }
+
+  const segments = classifyHolderSegments(beforeGroup.holders, afterGroup.holders);
+  const beforeWallets = new Set(beforeGroup.holders.map((holder) => holder.walletAddress));
+  const afterWallets = new Set(afterGroup.holders.map((holder) => holder.walletAddress));
+  const retainedHolders = [...beforeWallets].filter((wallet) => afterWallets.has(wallet)).length;
+  const after24h = findHolderGroupAfter(snapshotGroups, addMs(startedAt, 24 * 60 * 60 * 1000));
+  const after7d = findHolderGroupAfter(snapshotGroups, addMs(startedAt, 7 * 24 * 60 * 60 * 1000));
+
+  if (!after24h) missingRequirements.push("24h retention needs a snapshot at least 24 hours after campaign start.");
+  if (!after7d) missingRequirements.push("7d retention needs a snapshot at least 7 days after campaign start.");
+  if (!beforeToken || !afterToken) missingRequirements.push("Holder quality change needs token snapshots before and after the campaign.");
+
+  const newHolders = segments.filter((segment) => segment.segment === "NEW_HOLDER").length;
+  const likelyExited = segments.filter((segment) => segment.segment === "LIKELY_EXITED" || segment.segment === "RETAIL_CHURN").length;
+  const whaleEntries = segments.filter((segment) => segment.segment === "NEW_HOLDER" && ((segment.currentRank ?? 999) <= 50 || (segment.currentSupplyPercent ?? 0) >= 1)).length;
+  const whaleReduced = segments.filter((segment) => segment.segment === "WHALE_REDUCED").length;
+  const holderQualityChange = beforeToken && afterToken ? afterToken.holderHealthScore - beforeToken.holderHealthScore : 0;
+  const metrics: CampaignImpactMetrics = {
+    newHolders,
+    likelyExited,
+    retainedHolders,
+    retained24h: after24h ? countRetained(beforeGroup.holders, after24h.holders) : undefined,
+    retained7d: after7d ? countRetained(beforeGroup.holders, after7d.holders) : undefined,
+    whaleEntries,
+    whaleReduced,
+    holderQualityChange,
+    campaignImpactScore: campaignImpactScore({ newHolders, likelyExited, retainedHolders, whaleEntries, whaleReduced, holderQualityChange }, beforeGroup.holders.length)
+  };
+
+  return {
+    campaign,
+    status: missingRequirements.length > 0 ? "preview" : "complete",
+    metrics,
+    missingRequirements,
+    sourceSnapshotIds: [
+      beforeGroup.sourceRunId ?? beforeGroup.snapshotAt,
+      afterGroup.sourceRunId ?? afterGroup.snapshotAt,
+      beforeToken?.id ?? beforeToken?.snapshotAt,
+      afterToken?.id ?? afterToken?.snapshotAt
+    ].filter(Boolean) as string[]
+  };
+}
+
+function groupHoldersBySnapshot(holders: HolderSnapshot[]) {
+  const groups = new Map<string, HolderSnapshot[]>();
+  for (const holder of holders) {
+    const current = groups.get(holder.snapshotAt) ?? [];
+    current.push(holder);
+    groups.set(holder.snapshotAt, current);
+  }
+  return [...groups.entries()]
+    .map(([snapshotAt, items]) => ({ snapshotAt, holders: items, sourceRunId: items[0]?.sourceRunId }))
+    .sort((a, b) => new Date(a.snapshotAt).getTime() - new Date(b.snapshotAt).getTime());
+}
+
+function findNearestSnapshotBefore(snapshots: TokenSnapshot[], date: Date) {
+  return [...snapshots].reverse().find((snapshot) => new Date(snapshot.snapshotAt).getTime() < date.getTime());
+}
+
+function findNearestSnapshotAfter(snapshots: TokenSnapshot[], date: Date) {
+  return snapshots.find((snapshot) => new Date(snapshot.snapshotAt).getTime() >= date.getTime());
+}
+
+function findHolderGroupAfter(groups: Array<{ snapshotAt: string; holders: HolderSnapshot[]; sourceRunId?: string }>, date: Date) {
+  return groups.find((group) => new Date(group.snapshotAt).getTime() >= date.getTime());
+}
+
+function countRetained(before: HolderSnapshot[], after: HolderSnapshot[]) {
+  const afterWallets = new Set(after.map((holder) => holder.walletAddress));
+  return before.filter((holder) => afterWallets.has(holder.walletAddress)).length;
+}
+
+function addMs(date: Date, ms: number) {
+  return new Date(date.getTime() + ms);
+}
+
+function emptyCampaignMetrics(): CampaignImpactMetrics {
+  return {
+    newHolders: 0,
+    likelyExited: 0,
+    retainedHolders: 0,
+    whaleEntries: 0,
+    whaleReduced: 0,
+    holderQualityChange: 0
+  };
+}
+
+function campaignImpactScore(metrics: Omit<CampaignImpactMetrics, "campaignImpactScore" | "retained24h" | "retained7d">, baselineHolders: number) {
+  if (baselineHolders <= 0) return undefined;
+  const retentionScore = (metrics.retainedHolders / baselineHolders) * 45;
+  const acquisitionScore = Math.min(25, metrics.newHolders * 2);
+  const whaleScore = metrics.whaleEntries * 8 - metrics.whaleReduced * 10;
+  const qualityScore = metrics.holderQualityChange * 2;
+  const churnPenalty = (metrics.likelyExited / baselineHolders) * 35;
+  return Math.max(0, Math.min(100, Math.round(35 + retentionScore + acquisitionScore + whaleScore + qualityScore - churnPenalty)));
 }
