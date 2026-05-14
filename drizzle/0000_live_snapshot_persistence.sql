@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE INDEX IF NOT EXISTS alerts_token_created_idx ON alerts(token_id, created_at);
 
+CREATE TABLE IF NOT EXISTS campaign_markers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  token_id text NOT NULL,
+  name text NOT NULL,
+  description text,
+  started_at timestamptz NOT NULL,
+  ended_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS campaign_markers_token_started_idx ON campaign_markers(token_id, started_at);
+
 CREATE TABLE IF NOT EXISTS pipeline_runs (
   id text PRIMARY KEY,
   token_id text,

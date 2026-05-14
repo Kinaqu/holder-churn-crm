@@ -132,17 +132,86 @@ Authorization: Bearer ${CRON_SECRET}
 
 Cron processes only a tiny batch per run. Manual snapshot remains the primary MVP path.
 
+Cron behavior:
+
+- `CRON_SECRET` missing -> `CRON_SECRET_MISSING`
+- invalid bearer token -> `UNAUTHORIZED`
+- `DATABASE_URL` missing -> `DATABASE_NOT_CONFIGURED`
+- `BIRDEYE_API_KEY` missing -> `BIRDEYE_API_KEY_MISSING`
+- default batch size is 2 live tokens, capped at 3
+- one token failure is recorded in that token's `pipeline_runs` and does not fail the whole batch
+
+Manual snapshots remain the recommended path for demos and first live verification.
+
 ## Commands
 
 ```bash
 npm install
+npm run db:generate
+npm run db:migrate
 npm run db:push
+npm run db:studio
 npm run dev
 npm run seed:demo
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+Use `npm run db:push` for the fastest MVP setup against a fresh Neon/Postgres database. Use `npm run db:generate` and `npm run db:migrate` when you want a migration artifact workflow.
+
+## Deployment
+
+Required Vercel environment variables:
+
+```env
+BIRDEYE_API_KEY=
+DATABASE_URL=
+CRON_SECRET=
+NEXT_PUBLIC_APP_URL=
+```
+
+Optional environment variables:
+
+```env
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+DEMO_MODE=
+```
+
+Live deployment checklist:
+
+1. Create a Neon/Postgres database.
+2. Set `DATABASE_URL` in Vercel and locally for setup.
+3. Run `npm run db:push` against the production database, or use `npm run db:generate` then `npm run db:migrate`.
+4. Set `BIRDEYE_API_KEY`.
+5. Set `CRON_SECRET`.
+6. Deploy to Vercel.
+7. Add a live token through `/tokens/new`.
+8. Run a manual snapshot from `/tokens/[tokenId]`.
+9. Run a second snapshot later to see real diff-based holder segments and alerts.
+10. Verify the Pipeline panel shows persisted source status, run history, and API usage.
+
+Demo deploy mode:
+
+- Leave `DATABASE_URL` unset, or set `DEMO_MODE=true`.
+- The app serves deterministic demo data and clearly states that data is not persisted.
+- Live token creation and campaign marker creation are not persisted in this mode.
+
+Live deploy mode:
+
+- Set `DATABASE_URL`, `BIRDEYE_API_KEY`, and `CRON_SECRET`.
+- `DEMO_MODE` should be unset or `false`.
+- Campaign markers are saved to Postgres.
+- Campaign impact is calculated on read from persisted holder/token snapshots. If there is not enough snapshot history, the UI shows `Needs more snapshots` or `preview` instead of fake 24h/7d retention.
+
+Common failure states:
+
+- Missing API key: live snapshot and cron return `BIRDEYE_API_KEY_MISSING`.
+- Missing database: live persistence routes return `DATABASE_NOT_CONFIGURED`.
+- Insufficient campaign history: campaign impact returns `needs_more_snapshots` or `preview` with missing requirements.
+- Optional Birdeye source missing: snapshot is partial; holder data is still saved if Token Holder succeeded.
+- Token Holder source missing: snapshot fails, no fake holder snapshots are saved, and the failed pipeline run is recorded.
 
 ## Security Notes
 

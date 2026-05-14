@@ -93,15 +93,21 @@ export const alerts = pgTable("alerts", {
   sourceRunId: text("source_run_id").notNull()
 });
 
-export const campaignMarkers = pgTable("campaign_markers", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tokenId: text("token_id").notNull(),
-  name: text("name").notNull(),
-  description: text("description"),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
-  endedAt: timestamp("ended_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
-});
+export const campaignMarkers = pgTable(
+  "campaign_markers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tokenId: text("token_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    tokenStartedIdx: index("campaign_markers_token_started_idx").on(table.tokenId, table.startedAt)
+  })
+);
 
 export const pipelineRuns = pgTable("pipeline_runs", {
   id: text("id").primaryKey(),

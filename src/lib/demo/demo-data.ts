@@ -1,4 +1,4 @@
-import type { Alert, CampaignMarker, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
+import type { Alert, CampaignImpact, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 import { generateAlerts } from "@/lib/intelligence/alerts";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 
@@ -75,34 +75,54 @@ export const demoPipelineRun: PipelineRun = {
   ]
 };
 
-export const demoCampaigns: CampaignMarker[] = [
+export const demoCampaigns: CampaignImpact[] = [
   {
-    id: "campaign-community-week",
-    name: "Community Week",
-    description: "Seven-day community activation measured by retained holders, not impressions.",
-    startedAt: "2026-05-09T00:00:00.000Z",
-    endedAt: "2026-05-11T23:59:00.000Z",
-    mode: "demo",
-    newHolders: 312,
-    retained24h: 221,
-    retained7d: 164,
-    likelyExited: 58,
-    whaleEntries: 2,
-    holderQualityChange: 9,
-    impactScore: 78,
-    status: "complete"
+    campaign: {
+      id: "campaign-community-week",
+      tokenId: demoToken.id,
+      name: "Community Week",
+      description: "Seven-day community activation measured by retained holders, not impressions.",
+      startedAt: "2026-05-09T00:00:00.000Z",
+      endedAt: "2026-05-11T23:59:00.000Z",
+      createdAt: "2026-05-09T00:00:00.000Z",
+      mode: "demo"
+    },
+    status: "complete",
+    metrics: {
+      newHolders: 312,
+      retained24h: 221,
+      retained7d: 164,
+      retainedHolders: 386,
+      likelyExited: 58,
+      whaleEntries: 2,
+      whaleReduced: 1,
+      holderQualityChange: 9,
+      campaignImpactScore: 78
+    },
+    missingRequirements: [],
+    sourceSnapshotIds: ["2026-05-08T16:42:00.000Z", now]
   },
   {
-    id: "campaign-live-placeholder",
-    name: "Launchpad AMA",
-    description: "Live mode preview. Needs more snapshots before 24h/7d retention is honest.",
-    startedAt: "2026-05-12T12:00:00.000Z",
-    mode: "live",
-    newHolders: 0,
-    likelyExited: 0,
-    whaleEntries: 0,
-    holderQualityChange: 0,
-    status: "needs_more_snapshots"
+    campaign: {
+      id: "campaign-live-placeholder",
+      tokenId: demoToken.id,
+      name: "Launchpad AMA",
+      description: "Live mode preview. Needs more snapshots before 24h/7d retention is honest.",
+      startedAt: "2026-05-12T12:00:00.000Z",
+      createdAt: "2026-05-12T12:00:00.000Z",
+      mode: "demo"
+    },
+    status: "needs_more_snapshots",
+    metrics: {
+      newHolders: 0,
+      retainedHolders: 0,
+      likelyExited: 0,
+      whaleEntries: 0,
+      whaleReduced: 0,
+      holderQualityChange: 0
+    },
+    missingRequirements: ["Needs a snapshot before and after the campaign marker."],
+    sourceSnapshotIds: []
   }
 ];
 
