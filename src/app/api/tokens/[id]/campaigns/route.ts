@@ -1,3 +1,4 @@
+import { errorResponse, okResponse } from "@/lib/api-response";
 import { createCampaign, getCampaignImpactsByToken, getToken, hasPersistentStore } from "@/lib/db/repository";
 import { getDemoDataset } from "@/lib/demo/demo-data";
 
@@ -5,20 +6,20 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
 
   if (id === getDemoDataset().token.id) {
-    return Response.json({ ok: true, campaigns: getDemoDataset().campaigns, demo: true });
+    return okResponse({ campaigns: getDemoDataset().campaigns, demo: true });
   }
 
   if (!hasPersistentStore()) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
   const token = await getToken(id);
   if (!token) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
   const campaigns = await getCampaignImpactsByToken(id);
-  return Response.json({ ok: true, campaigns, demo: false });
+  return okResponse({ campaigns, demo: false });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -26,34 +27,34 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
   if (id === getDemoDataset().token.id) {
-    return Response.json({ ok: false, code: "DATABASE_NOT_CONFIGURED", message: "Demo campaign markers are deterministic and are not persisted." }, { status: 503 });
+    return errorResponse("DATABASE_NOT_CONFIGURED", "Demo campaign markers are deterministic and are not persisted.", 503);
   }
 
   if (!hasPersistentStore()) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
   const token = await getToken(id);
   if (!token) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
   const validation = validateCampaignInput(body);
   if (!validation.ok) {
-    return Response.json({ ok: false, code: "INVALID_CAMPAIGN_INPUT", message: validation.message }, { status: 400 });
+    return errorResponse("INVALID_CAMPAIGN_INPUT", validation.message, 400);
   }
 
   try {
     const campaign = await createCampaign(id, validation.input);
     if (!campaign) {
-      return Response.json({ ok: false, code: "CAMPAIGN_CREATE_FAILED", message: "Campaign marker could not be saved." }, { status: 500 });
+      return errorResponse("CAMPAIGN_CREATE_FAILED", "Campaign marker could not be saved.", 500);
     }
 
     const campaigns = await getCampaignImpactsByToken(id);
-    return Response.json({ ok: true, campaign, campaigns, demo: false }, { status: 201 });
+    return okResponse({ campaign, campaigns, demo: false }, { status: 201 });
   } catch (error) {
     console.error("Campaign marker create failed", error);
-    return Response.json({ ok: false, code: "CAMPAIGN_CREATE_FAILED", message: "Campaign marker could not be saved." }, { status: 500 });
+    return errorResponse("CAMPAIGN_CREATE_FAILED", "Campaign marker could not be saved.", 500);
   }
 }
 

@@ -18,6 +18,12 @@ import { cn } from "@/lib/utils/cn";
 
 type Tab = "overview" | "holders" | "alerts" | "campaigns" | "pipeline" | "settings";
 
+type ApiErrorPayload = {
+  code?: string;
+  message?: string;
+  error?: { code: string; message: string };
+};
+
 const tabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "holders", label: "Holders", icon: Users },
@@ -43,14 +49,21 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
     setSnapshotError(null);
     startTransition(async () => {
       const response = await fetch(`/api/tokens/${dataset.token.id}/snapshot`, { method: "POST" });
-      const payload = (await response.json()) as { ok?: boolean; code?: string; message?: string; dataset?: TokenDataset; partial?: boolean };
-      if (!response.ok || payload.ok === false || !payload.dataset) {
-        setSnapshotError(payload.code ? `${payload.code}: ${payload.message ?? "Snapshot failed."}` : "Snapshot failed.");
+      const payload = (await response.json()) as { ok?: boolean; data?: { dataset?: TokenDataset; partial?: boolean }; dataset?: TokenDataset; partial?: boolean } & ApiErrorPayload;
+      const nextDataset = payload.data?.dataset ?? payload.dataset;
+      if (!response.ok || payload.ok === false) {
+        if (nextDataset) setDataset(nextDataset);
+        setSnapshotError(formatApiError(payload, "Snapshot failed."));
         setActiveTab("pipeline");
         return;
       }
-      setDataset(payload.dataset);
-      setSnapshotMessage(payload.partial ? "PARTIAL_SNAPSHOT_COMPLETED: Required holder data loaded. One or more optional Birdeye sources were unavailable." : "SNAPSHOT_COMPLETED: Live snapshot completed.");
+      if (!nextDataset) {
+        setSnapshotError("Snapshot completed but the response did not include a dataset.");
+        setActiveTab("pipeline");
+        return;
+      }
+      setDataset(nextDataset);
+      setSnapshotMessage((payload.data?.partial ?? payload.partial) ? "PARTIAL_SNAPSHOT_COMPLETED: Required holder data loaded. One or more optional Birdeye sources were unavailable." : "SNAPSHOT_COMPLETED: Live snapshot completed.");
       setActiveTab("pipeline");
     });
   }
@@ -154,7 +167,6 @@ function Holders({ dataset }: { dataset: TokenDataset }) {
             <h2 className="text-xl font-semibold text-white">Holder Segments</h2>
             <p className="mt-1 text-sm text-slate-400">Snapshot diffing converts Birdeye holder data into retention cohorts.</p>
           </div>
-          <button className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5">Export CSV</button>
         </div>
         <HolderChangeTable segments={dataset.segments} />
       </section>
@@ -195,12 +207,13 @@ function Campaigns({ dataset, onDatasetChange }: { dataset: TokenDataset; onData
           endedAt: endedAt ? localDateTimeToIso(endedAt) : undefined
         })
       });
-      const payload = (await response.json()) as { ok?: boolean; code?: string; message?: string; campaigns?: CampaignImpact[] };
-      if (!response.ok || payload.ok === false || !payload.campaigns) {
-        setMessage(payload.code ? `${payload.code}: ${payload.message ?? "Campaign marker was not saved."}` : "Campaign marker was not saved.");
+      const payload = (await response.json()) as { ok?: boolean; data?: { campaigns?: CampaignImpact[] }; campaigns?: CampaignImpact[] } & ApiErrorPayload;
+      const campaigns = payload.data?.campaigns ?? payload.campaigns;
+      if (!response.ok || payload.ok === false || !campaigns) {
+        setMessage(formatApiError(payload, "Campaign marker was not saved."));
         return;
       }
-      onDatasetChange({ ...dataset, campaigns: payload.campaigns });
+      onDatasetChange({ ...dataset, campaigns });
       setName("");
       setDescription("");
       setEndedAt("");
@@ -251,6 +264,7 @@ function Campaigns({ dataset, onDatasetChange }: { dataset: TokenDataset; onData
       ) : null}
       {message ? <div className="mt-4 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">{message}</div> : null}
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        {dataset.campaigns.length === 0 ? <EmptyState title="No campaign markers yet" body="Create a live campaign marker after collecting snapshots to measure holder impact honestly." /> : null}
         {dataset.campaigns.map((impact) => (
           <article key={impact.campaign.id} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
             <div className="flex items-start justify-between gap-3">
@@ -349,6 +363,21 @@ function Pipeline({ dataset }: { dataset: TokenDataset }) {
 
 function localDateTimeToIso(value: string) {
   return new Date(value).toISOString();
+}
+
+function formatApiError(payload: ApiErrorPayload, fallback: string) {
+  const code = payload.error?.code ?? payload.code;
+  const message = payload.error?.message ?? payload.message ?? fallback;
+  return code ? `${code}: ${message}` : message;
+}
+
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+      <h3 className="font-semibold text-white">{title}</h3>
+      <p className="mt-1 text-sm text-slate-400">{body}</p>
+    </div>
+  );
 }
 
 function SettingsTab() {

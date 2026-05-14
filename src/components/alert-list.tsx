@@ -3,6 +3,15 @@ import { RiskBadge, SourceBadge } from "@/components/ui/badges";
 import { WalletAddress } from "@/components/ui/address";
 
 export function AlertList({ alerts }: { alerts: Alert[] }) {
+  if (alerts.length === 0) {
+    return (
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+        <h3 className="font-semibold text-white">No source-backed alerts yet</h3>
+        <p className="mt-1 text-sm text-slate-400">Alerts appear after snapshots produce meaningful churn, whale, distribution, or price-quality signals.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {alerts.map((alert) => (

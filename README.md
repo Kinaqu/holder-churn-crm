@@ -1,10 +1,18 @@
 # Holder Churn CRM
 
-Birdeye-powered retention analytics for tokenized communities.
+Birdeye-powered retention intelligence for tokenized communities.
 
 Holder Churn CRM is not a token scanner, trading bot, or generic crypto dashboard. Birdeye is the data infrastructure. Holder Churn CRM is the retention intelligence and action layer on top: holder churn, whale confidence, campaign quality, explainable alerts, and Next Best Actions.
 
 This is analytics software, not financial advice.
+
+## What It Does
+
+- Holder churn: identifies likely exits and reduced positions from consecutive holder snapshots.
+- Whale confidence: tracks top-holder accumulation and reduction pressure.
+- Distribution risk: uses holder concentration to explain fragility risk.
+- Campaign impact: compares persisted snapshots around campaign markers without inventing retention.
+- Source-verifiable alerts: attaches Birdeye sources, reasons, confidence, and Next Best Actions.
 
 ## Demo Walkthrough
 
@@ -38,16 +46,13 @@ Holder Churn CRM turns these primitives into retention analytics, whale confiden
 ## Architecture
 
 ```text
-Frontend
-  -> Next.js API Routes
-  -> Birdeye Server-Side Client
-  -> Birdeye Data API
-  -> Snapshot Diff
-  -> Segment Classification
-  -> Holder Health Scoring
-  -> Explainable Alerts
-  -> Next Best Actions
-  -> CRM Dashboard
+Birdeye Data API
+  -> Server-side Birdeye client
+  -> Snapshot runner
+  -> Postgres persistence
+  -> Holder diff and segments
+  -> Scores, alerts, and actions
+  -> Dashboard
 ```
 
 The MVP is snapshot-first, cache-aware, and designed around a safe internal target of 50 Birdeye requests per minute.
@@ -120,7 +125,7 @@ If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly s
 ```json
 {
   "path": "/api/cron/snapshot",
-  "schedule": "0 */6 * * *"
+  "schedule": "0 0 * * *"
 }
 ```
 
@@ -225,3 +230,12 @@ Common failure states:
 ## Production Deferred
 
 The MVP intentionally defers advanced queues, campaign impact report storage, complex multi-project tenancy, and deep wallet enrichment history. Those are documented as production enhancements so they do not block the polished hackathon demo.
+
+## Known Limitations
+
+- Holder snapshots are top-holder snapshots, not a full historical warehouse.
+- Missing wallets are labeled likely exited or dropped below the tracked threshold.
+- Wallet enrichment is selective and skipped when budget is tight.
+- Campaign impact needs real before/after snapshots; 24h and 7d retention remain pending until the required windows exist.
+- Scores are transparent heuristics, not ML predictions.
+- This is analytics software, not financial advice.
