@@ -1,3 +1,4 @@
+import { errorResponse, okResponse } from "@/lib/api-response";
 import { getTokenDataset } from "@/lib/db/repository";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -5,11 +6,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const dataset = await getTokenDataset(params.id);
 
   if (!dataset) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
-  return Response.json({
-    ok: true,
+  return okResponse({
     token: dataset.token,
     latestTokenSnapshot: dataset.snapshots.at(-1) ?? null,
     latestHolderSegments: dataset.segments,

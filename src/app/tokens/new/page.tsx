@@ -9,6 +9,7 @@ import type { Token } from "@/lib/types";
 type CreateTokenResponse =
   | {
       ok: true;
+      data?: { token: Token; demo: boolean; persistent: boolean; warning?: { code: string; message: string } };
       token: Token;
       demo: boolean;
       persistent: boolean;
@@ -16,8 +17,9 @@ type CreateTokenResponse =
     }
   | {
       ok: false;
-      code: string;
-      message: string;
+      code?: string;
+      message?: string;
+      error?: { code: string; message: string };
     };
 
 export default function NewTokenPage() {
@@ -42,12 +44,16 @@ export default function NewTokenPage() {
       const payload = (await response.json()) as CreateTokenResponse;
 
       if (!response.ok || !payload.ok) {
-        setError(payload.ok ? "Token creation failed." : `${payload.code}: ${payload.message}`);
+        const code = payload.ok ? undefined : payload.error?.code ?? payload.code;
+        const message = payload.ok ? "Token creation failed." : payload.error?.message ?? payload.message ?? "Token creation failed.";
+        setError(code ? `${code}: ${message}` : message);
         return;
       }
 
-      if (payload.warning) setMessage(`${payload.warning.code}: ${payload.warning.message}`);
-      router.push(`/tokens/${payload.token.id}`);
+      const token = payload.data?.token ?? payload.token;
+      const warning = payload.data?.warning ?? payload.warning;
+      if (warning) setMessage(`${warning.code}: ${warning.message}`);
+      router.push(`/tokens/${token.id}`);
     });
   }
 

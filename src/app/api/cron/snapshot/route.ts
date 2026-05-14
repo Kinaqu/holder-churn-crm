@@ -1,3 +1,4 @@
+import { errorResponse, okResponse } from "@/lib/api-response";
 import { listLiveTokensForSnapshotBatch, hasPersistentStore } from "@/lib/db/repository";
 import { runPersistedLiveSnapshot } from "@/lib/intelligence/live-snapshot";
 
@@ -14,23 +15,23 @@ export async function POST(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
 
   if (!authHeader) {
-    return Response.json({ ok: false, code: "UNAUTHORIZED", message: "Unauthorized." }, { status: 401 });
+    return errorResponse("UNAUTHORIZED", "Unauthorized.", 401);
   }
 
   if (!cronSecret) {
-    return Response.json({ ok: false, code: "CRON_SECRET_MISSING", message: "CRON_SECRET is required before cron snapshots can run." }, { status: 503 });
+    return errorResponse("CRON_SECRET_MISSING", "CRON_SECRET is required before cron snapshots can run.", 503);
   }
 
   if (authHeader !== `Bearer ${cronSecret}`) {
-    return Response.json({ ok: false, code: "UNAUTHORIZED", message: "Unauthorized." }, { status: 401 });
+    return errorResponse("UNAUTHORIZED", "Unauthorized.", 401);
   }
 
   if (!hasPersistentStore()) {
-    return Response.json({ ok: false, code: "DATABASE_NOT_CONFIGURED", message: "DATABASE_URL is required for live cron snapshots." }, { status: 503 });
+    return errorResponse("DATABASE_NOT_CONFIGURED", "DATABASE_URL is required for live cron snapshots.", 503);
   }
 
   if (!process.env.BIRDEYE_API_KEY) {
-    return Response.json({ ok: false, code: "BIRDEYE_API_KEY_MISSING", message: "BIRDEYE_API_KEY is required for live cron snapshots." }, { status: 503 });
+    return errorResponse("BIRDEYE_API_KEY_MISSING", "BIRDEYE_API_KEY is required for live cron snapshots.", 503);
   }
 
   const batchSize = clampBatchSize(new URL(request.url).searchParams.get("limit"));
@@ -72,8 +73,7 @@ export async function POST(request: Request) {
     }
   }
 
-  return Response.json({
-    ok: true,
+  return okResponse({
     batchLimit: batchSize,
     apiSafeBudget: 50,
     apiCallsUsed: aggregateApiCalls,

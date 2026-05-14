@@ -1,23 +1,24 @@
+import { errorResponse, okResponse } from "@/lib/api-response";
 import { getApiCallLogsByRun, getPipelineRunsByToken, getToken, hasPersistentStore } from "@/lib/db/repository";
 import { getDemoDataset } from "@/lib/demo/demo-data";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const params = await context.params;
   if (params.id === getDemoDataset().token.id) {
-    return Response.json({ ok: true, pipelineRuns: [getDemoDataset().pipelineRun], apiCallLogs: [], demo: true });
+    return okResponse({ pipelineRuns: [getDemoDataset().pipelineRun], apiCallLogs: [], demo: true });
   }
 
   if (!hasPersistentStore()) {
-    return Response.json({ ok: false, code: "DATABASE_NOT_CONFIGURED", message: "DATABASE_URL is required to read live pipeline runs." }, { status: 503 });
+    return errorResponse("DATABASE_NOT_CONFIGURED", "DATABASE_URL is required to read live pipeline runs.", 503);
   }
 
   const token = await getToken(params.id);
   if (!token) {
-    return Response.json({ ok: false, code: "TOKEN_NOT_FOUND", message: "Token was not found." }, { status: 404 });
+    return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
   }
 
   const pipelineRuns = await getPipelineRunsByToken(params.id);
   const latestRun = pipelineRuns[0];
   const apiCallLogs = latestRun ? await getApiCallLogsByRun(latestRun.id) : [];
-  return Response.json({ ok: true, pipelineRuns, apiCallLogs, demo: false });
+  return okResponse({ pipelineRuns, apiCallLogs, demo: false });
 }

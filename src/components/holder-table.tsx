@@ -4,6 +4,15 @@ import { WalletAddress } from "@/components/ui/address";
 import { formatPercent } from "@/lib/utils/format";
 
 export function HolderChangeTable({ segments }: { segments: HolderSegment[] }) {
+  if (segments.length === 0) {
+    return (
+      <div className="rounded-lg border border-white/10 bg-white/[0.03] p-5">
+        <h3 className="font-semibold text-white">No holder segments yet</h3>
+        <p className="mt-1 text-sm text-slate-400">Run a live snapshot to create a baseline, then run another snapshot later to calculate churn and balance changes.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border border-white/10">
       <table className="w-full min-w-[760px] border-collapse text-left text-sm">

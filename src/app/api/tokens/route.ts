@@ -1,10 +1,11 @@
+import { errorResponse, okResponse } from "@/lib/api-response";
 import { getDemoDataset } from "@/lib/demo/demo-data";
 import { createToken, hasPersistentStore, isDemoTokenMode, listTokens } from "@/lib/db/repository";
 import { normalizeAndValidateTokenInput } from "@/lib/tokens";
 
 export async function GET() {
   const tokens = await listTokens();
-  return Response.json({ tokens, demo: isDemoTokenMode(), persistent: hasPersistentStore() });
+  return okResponse({ tokens, demo: isDemoTokenMode(), persistent: hasPersistentStore() });
 }
 
 export async function POST(request: Request) {
@@ -12,19 +13,11 @@ export async function POST(request: Request) {
   const validation = normalizeAndValidateTokenInput(body);
 
   if (!validation.ok) {
-    return Response.json(
-      {
-        ok: false,
-        code: validation.code,
-        message: validation.message
-      },
-      { status: 400 }
-    );
+    return errorResponse(validation.code, validation.message, 400);
   }
 
   if (isDemoTokenMode()) {
-    return Response.json({
-      ok: true,
+    return okResponse({
       token: getDemoDataset().token,
       demo: true,
       persistent: false,
@@ -45,7 +38,7 @@ export async function POST(request: Request) {
     decimals: Number.isFinite(Number(body.decimals)) ? Number(body.decimals) : 6
   });
 
-  return Response.json({ ok: true, token, demo: false, persistent: true }, { status: 201 });
+  return okResponse({ token, demo: false, persistent: true }, { status: 201 });
 }
 
 async function readTokenRequestBody(request: Request) {
