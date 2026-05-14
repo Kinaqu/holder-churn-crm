@@ -11,6 +11,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return Response.json({
     ok: true,
     token: dataset.token,
+    latestTokenSnapshot: dataset.snapshots.at(-1) ?? null,
+    latestHolderSegments: dataset.segments,
+    latestAlerts: dataset.alerts,
+    latestPipelineRun: dataset.pipelineRun,
     dataset,
     dataAvailability: {
       hasSnapshots: dataset.snapshots.some((snapshot) => snapshot.holderCount > 0),

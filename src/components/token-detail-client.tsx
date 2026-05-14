@@ -34,6 +34,7 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const latest = dataset.snapshots.at(-1)!;
+  const isBaselineSnapshot = dataset.pipelineRun.mode === "live" && dataset.holders.length > 0 && dataset.segments.every((segment) => segment.segment === "BASELINE_HOLDER");
 
   const modeLabel = dataset.pipelineRun.mode === "demo" ? "Demo mode: data is deterministic and not persisted" : "Live mode";
 
@@ -57,6 +58,7 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="mb-5 rounded-lg border border-signal-cyan/25 bg-signal-cyan/10 px-4 py-3 text-sm text-signal-cyan">{modeLabel}</div>
+      {isBaselineSnapshot ? <div className="mb-5 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">Baseline snapshot - run another snapshot to calculate churn.</div> : null}
       {snapshotError ? <div className="mb-5 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">{snapshotError}</div> : null}
       {snapshotMessage ? <div className="mb-5 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">{snapshotMessage}</div> : null}
       <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">

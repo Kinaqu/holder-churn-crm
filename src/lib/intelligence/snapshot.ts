@@ -10,7 +10,8 @@ export class SnapshotError extends Error {
   constructor(
     readonly code: "INVALID_TOKEN_ADDRESS" | "BIRDEYE_API_KEY_MISSING" | "TOKEN_HOLDER_SOURCE_FAILED" | "SNAPSHOT_FAILED",
     message: string,
-    readonly status = 400
+    readonly status = 400,
+    readonly details?: { pipelineRun?: PipelineRun; apiCallLogs?: ApiCallLog[] }
   ) {
     super(message);
   }
@@ -45,7 +46,28 @@ export async function runManualSnapshot(input: {
 
   const holdersResult = await client.getTokenHolders(chain, address, 100);
   if (!holdersResult.ok) {
-    throw new SnapshotError("TOKEN_HOLDER_SOURCE_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502);
+    const completedAt = new Date().toISOString();
+    const pipelineRun: PipelineRun = {
+      id: input.runId ?? `run-${Date.now()}`,
+      status: "failed",
+      mode: "live",
+      apiCallsUsed: client.usage.calls,
+      apiSafeBudget: 50,
+      holdersScanned: 0,
+      walletsEnriched: 0,
+      cacheHits: client.usage.cacheHits,
+      cacheMisses: client.usage.cacheMisses,
+      durationMs: Date.now() - startedAt.getTime(),
+      rateLimitBudgetUsed: Math.round((client.usage.calls / 50) * 100),
+      stayedUnderLimit: client.usage.calls <= 50,
+      startedAt: startedAt.toISOString(),
+      completedAt,
+      sources: [{ source: "Token Holder", status: "missing", detail: holdersResult.error, calls: holdersResult.cacheHit ? 0 : client.usage.calls }]
+    };
+    throw new SnapshotError("TOKEN_HOLDER_SOURCE_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502, {
+      pipelineRun,
+      apiCallLogs: toApiCallLogs([holdersResult], pipelineRun.id, input.tokenId)
+    });
   }
 
   const [distribution, price, security, transfers] = await Promise.all([
@@ -93,16 +115,7 @@ export async function runManualSnapshot(input: {
       { source: "Wallet Current Net Worth", status: "skipped", detail: "wallet enrichment deferred unless a high-priority wallet needs it", calls: 0 }
     ]
   };
-  const apiCallLogs: ApiCallLog[] = [holdersResult, distribution, price, security, transfers].map((result) => ({
-    runId: pipelineRun.id,
-    endpoint: result.sourceLabel,
-    tokenId: input.tokenId,
-    statusCode: result.statusCode,
-    cacheHit: result.cacheHit,
-    durationMs: result.durationMs,
-    errorMessage: result.ok ? undefined : result.error,
-    createdAt: new Date().toISOString()
-  }));
+  const apiCallLogs = toApiCallLogs([holdersResult, distribution, price, security, transfers], pipelineRun.id, input.tokenId);
 
   return {
     token: {
@@ -126,6 +139,20 @@ export async function runManualSnapshot(input: {
     pipelineRun,
     apiCallLogs
   };
+}
+
+function toApiCallLogs(results: Array<{ sourceLabel: string; statusCode?: number; cacheHit: boolean; durationMs: number; ok: boolean; error?: string }>, runId: string, tokenId: string): ApiCallLog[] {
+  const createdAt = new Date().toISOString();
+  return results.map((result) => ({
+    runId,
+    endpoint: result.sourceLabel,
+    tokenId,
+    statusCode: result.statusCode,
+    cacheHit: result.cacheHit,
+    durationMs: result.durationMs,
+    errorMessage: result.ok ? undefined : result.error,
+    createdAt
+  }));
 }
 
 export function isDemoMode() {

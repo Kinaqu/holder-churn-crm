@@ -1,5 +1,16 @@
-import { runManualSnapshot } from "@/lib/intelligence/snapshot";
-import { createPipelineRun, getLatestHolderSnapshots, getStoredTokenSnapshots, getToken, isDemoTokenMode, markPipelineRunFailed, saveSnapshotDataset } from "@/lib/db/repository";
+import { runManualSnapshot, SnapshotError } from "@/lib/intelligence/snapshot";
+import {
+  createPipelineRun,
+  getLatestHolderSnapshots,
+  getStoredTokenSnapshots,
+  getToken,
+  getTokenDataset,
+  isDemoTokenMode,
+  markPipelineRunFailed,
+  saveApiCallLogs,
+  saveSnapshotDataset,
+  updatePipelineRun
+} from "@/lib/db/repository";
 import { normalizeAndValidateTokenInput } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -45,24 +56,30 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       runId: run.id
     });
     await saveSnapshotDataset(dataset);
+    const persistedDataset = (await getTokenDataset(token.id)) ?? dataset;
 
     return Response.json({
       ok: true,
       code: dataset.pipelineRun.status === "partial" ? "PARTIAL_SNAPSHOT_COMPLETED" : "SNAPSHOT_COMPLETED",
-      dataset,
-      partial: dataset.pipelineRun.status === "partial"
+      dataset: persistedDataset,
+      partial: persistedDataset.pipelineRun.status === "partial"
     });
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "SNAPSHOT_FAILED";
     const status = error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : 500;
     if (runningRun) {
       try {
-        await markPipelineRunFailed({
-          tokenId: runningRun.tokenId,
-          runId: runningRun.id,
-          startedAt: runningRun.startedAt,
-          errorMessage: code
-        });
+        if (error instanceof SnapshotError && error.details?.pipelineRun) {
+          await saveApiCallLogs(error.details.apiCallLogs ?? []);
+          await updatePipelineRun(runningRun.tokenId, error.details.pipelineRun, code);
+        } else {
+          await markPipelineRunFailed({
+            tokenId: runningRun.tokenId,
+            runId: runningRun.id,
+            startedAt: runningRun.startedAt,
+            errorMessage: code
+          });
+        }
       } catch (persistenceError) {
         console.error("Failed to mark pipeline run failed", persistenceError);
       }
