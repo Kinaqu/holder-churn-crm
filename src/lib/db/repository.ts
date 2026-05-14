@@ -138,6 +138,8 @@ export async function getToken(id: string): Promise<Token | null> {
   return row ? mapToken(row) : null;
 }
 
+export const getTokenById = getToken;
+
 export async function createToken(input: { chain: string; address: string; symbol?: string; name?: string; decimals?: number }) {
   const now = new Date().toISOString();
   const id = createStableTokenId(input.chain, input.address);
@@ -232,16 +234,24 @@ export async function getLatestHolderSnapshots(tokenId: string): Promise<HolderS
   return rows.results?.map(mapHolder) ?? [];
 }
 
-export async function getPreviousHolderSnapshots(tokenId: string, beforeSnapshotAt?: string): Promise<HolderSnapshot[]> {
+export async function getPreviousHolderSnapshots(
+  tokenId: string,
+  before?: string | { beforeSnapshotAt?: string; beforeRunId?: string }
+): Promise<HolderSnapshot[]> {
   if (!hasPersistentStore()) return [];
-  if (!beforeSnapshotAt) return getLatestHolderSnapshots(tokenId);
+  const beforeSnapshotAt = typeof before === "string" ? before : before?.beforeSnapshotAt;
+  const beforeRunId = typeof before === "object" ? before.beforeRunId : undefined;
+  if (!beforeSnapshotAt && !beforeRunId) return getLatestHolderSnapshots(tokenId);
 
   if (hasDatabase()) {
-    const before = new Date(beforeSnapshotAt);
+    const resolvedBeforeSnapshotAt = beforeSnapshotAt ?? (beforeRunId ? await getSnapshotAtForRun(tokenId, beforeRunId) : undefined);
+    if (!resolvedBeforeSnapshotAt) return [];
+
+    const beforeDate = new Date(resolvedBeforeSnapshotAt);
     const latest = await getDb()
       .select({ snapshotAt: holderSnapshots.snapshotAt })
       .from(holderSnapshots)
-      .where(and(eq(holderSnapshots.tokenId, tokenId), lt(holderSnapshots.snapshotAt, before)))
+      .where(and(eq(holderSnapshots.tokenId, tokenId), lt(holderSnapshots.snapshotAt, beforeDate)))
       .orderBy(desc(holderSnapshots.snapshotAt))
       .limit(1);
     const snapshotAt = latest[0]?.snapshotAt;
@@ -256,6 +266,16 @@ export async function getPreviousHolderSnapshots(tokenId: string, beforeSnapshot
   }
 
   return getLatestHolderSnapshots(tokenId);
+}
+
+async function getSnapshotAtForRun(tokenId: string, runId: string) {
+  const rows = await getDb()
+    .select({ snapshotAt: holderSnapshots.snapshotAt })
+    .from(holderSnapshots)
+    .where(and(eq(holderSnapshots.tokenId, tokenId), eq(holderSnapshots.sourceRunId, runId)))
+    .orderBy(desc(holderSnapshots.snapshotAt))
+    .limit(1);
+  return rows[0]?.snapshotAt?.toISOString();
 }
 
 export async function getHolderSnapshotHistory(tokenId: string): Promise<HolderSnapshot[]> {
@@ -638,29 +658,34 @@ export async function saveApiCallLogs(logs: ApiCallLog[]) {
 
 export async function saveSnapshotDataset(dataset: TokenDataset) {
   if (hasDatabase()) {
-    const token = dataset.token;
-    const run = dataset.pipelineRun;
-    const latestSnapshot = dataset.snapshots.at(-1);
-    if (!latestSnapshot) return;
+    try {
+      const token = dataset.token;
+      const run = dataset.pipelineRun;
+      const latestSnapshot = dataset.snapshots.at(-1);
+      if (!latestSnapshot) return;
 
-    await getDb()
-      .update(tokens)
-      .set({
-        symbol: token.symbol,
-        name: token.name,
-        decimals: token.decimals,
-        securityStatus: token.securityStatus,
-        updatedAt: new Date(latestSnapshot.snapshotAt)
-      })
-      .where(eq(tokens.id, token.id));
+      await getDb()
+        .update(tokens)
+        .set({
+          symbol: token.symbol,
+          name: token.name,
+          decimals: token.decimals,
+          securityStatus: token.securityStatus,
+          updatedAt: new Date(latestSnapshot.snapshotAt)
+        })
+        .where(eq(tokens.id, token.id));
 
-    await saveHolderSnapshots(token.id, run.id, dataset.holders, latestSnapshot.snapshotAt);
-    await saveHolderSegments(token.id, run.id, dataset.segments);
-    await saveTokenSnapshot(token.id, run.id, latestSnapshot);
-    await saveAlerts(token.id, run.id, dataset.alerts);
-    await saveApiCallLogs(dataset.apiCallLogs ?? []);
-    await updatePipelineRun(token.id, run);
-    return;
+      await saveHolderSnapshots(token.id, run.id, dataset.holders, latestSnapshot.snapshotAt);
+      await saveHolderSegments(token.id, run.id, dataset.segments);
+      await saveTokenSnapshot(token.id, run.id, latestSnapshot);
+      await saveAlerts(token.id, run.id, dataset.alerts);
+      await saveApiCallLogs(dataset.apiCallLogs ?? []);
+      await updatePipelineRun(token.id, run);
+      return;
+    } catch (error) {
+      console.error("Failed to persist snapshot dataset", error);
+      throw new RepositoryError("PERSISTENCE_WRITE_FAILED", "Snapshot completed but could not be written to the database.");
+    }
   }
 
   if (!hasD1()) return;
@@ -1143,4 +1168,14 @@ function toIso(value: Date | string) {
 
 function decimal(value: number | null | undefined) {
   return String(value ?? 0);
+}
+
+export class RepositoryError extends Error {
+  constructor(
+    readonly code: "PERSISTENCE_WRITE_FAILED",
+    message: string,
+    readonly status = 500
+  ) {
+    super(message);
+  }
 }

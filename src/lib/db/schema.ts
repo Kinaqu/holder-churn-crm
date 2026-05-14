@@ -1,16 +1,22 @@
-import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
-export const tokens = pgTable("tokens", {
-  id: text("id").primaryKey(),
-  chain: text("chain").notNull(),
-  address: text("address").notNull(),
-  symbol: text("symbol").notNull(),
-  name: text("name").notNull(),
-  securityStatus: text("security_status").default("unknown").notNull(),
-  decimals: integer("decimals").default(6).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-});
+export const tokens = pgTable(
+  "tokens",
+  {
+    id: text("id").primaryKey(),
+    chain: text("chain").notNull(),
+    address: text("address").notNull(),
+    symbol: text("symbol").notNull(),
+    name: text("name").notNull(),
+    securityStatus: text("security_status").default("unknown").notNull(),
+    decimals: integer("decimals").default(6).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => ({
+    chainAddressIdx: uniqueIndex("tokens_chain_address_idx").on(table.chain, table.address)
+  })
+);
 
 export const holderSnapshots = pgTable(
   "holder_snapshots",
