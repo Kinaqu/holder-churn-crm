@@ -44,6 +44,23 @@ const checks: EndpointCheck[] = [
     }
   },
   {
+    name: "Token Overview",
+    method: "GET",
+    path: "/defi/token_overview",
+    query: {
+      address,
+      ui_amount_mode: "scaled"
+    }
+  },
+  {
+    name: "Token Metadata",
+    method: "GET",
+    path: "/defi/v3/token/meta-data/single",
+    query: {
+      address
+    }
+  },
+  {
     name: "Holder Distribution",
     method: "GET",
     path: "/holder/v1/distribution",
@@ -109,6 +126,7 @@ async function runCheck(check: EndpointCheck) {
   const text = await response.text();
   const parsed = safeJson(text);
   const itemsCount = countItems(parsed);
+  const firstItems = firstObjects(parsed, 5);
 
   console.log("");
   console.log(check.name);
@@ -119,7 +137,12 @@ async function runCheck(check: EndpointCheck) {
     ok: response.ok,
     durationMs,
     headers: diagnosticHeaders(response.headers),
+    topLevelKeys: objectKeys(parsed),
+    dataKeys: objectKeys(dataObject(parsed)),
+    candidateFields: candidateFieldReport(parsed),
     itemsCount,
+    firstItemKeys: firstItems.map((item) => Object.keys(item)),
+    firstItemCandidates: firstItems.map(candidateFieldReport),
     bodyPreview: sanitize(text).slice(0, 1_000)
   });
 }
@@ -143,11 +166,43 @@ function countItems(value: unknown): number | undefined {
   return firstArray ? firstArray.length : undefined;
 }
 
+function firstObjects(value: unknown, limit: number): Record<string, unknown>[] {
+  const arrays = findArrays(value);
+  const firstArray = arrays[0];
+  if (!firstArray) return [];
+  return firstArray.filter(isRecord).slice(0, limit);
+}
+
 function findArrays(value: unknown): unknown[][] {
   if (Array.isArray(value)) return [value];
   if (!value || typeof value !== "object") return [];
 
   return Object.values(value as Record<string, unknown>).flatMap(findArrays);
+}
+
+function candidateFieldReport(value: unknown) {
+  const record = dataObject(value) ?? (isRecord(value) ? value : {});
+  return {
+    identity: pick(record, ["symbol", "tokenSymbol", "token_symbol", "name", "tokenName", "token_name", "decimals", "decimal"]),
+    totals: pick(record, ["holderCount", "holder_count", "holdersCount", "totalHolders", "total_holders", "total", "supply", "totalSupply", "total_supply", "circulating_supply"]),
+    concentration: pick(record, ["top10", "top10SupplyPercent", "top10HolderPercent", "top_10_supply_percent", "top50", "top50SupplyPercent", "top50HolderPercent", "top_50_supply_percent"]),
+    wallet: pick(record, ["owner", "ownerAddress", "owner_address", "wallet", "walletAddress", "wallet_address", "address", "holder", "holderAddress", "tokenAccount", "tokenAccountAddress", "token_account", "account", "accountAddress"]),
+    percent: pick(record, ["percentage", "supplyPercent", "supply_percent", "percent", "pct", "ownerPercentage", "amountPercentage", "uiAmountPercentage", "share", "ratio"]),
+    balance: pick(record, ["uiAmount", "ui_amount", "balance", "amount", "valueUsd", "value_usd"])
+  };
+}
+
+function dataObject(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  return isRecord(value.data) ? value.data : value;
+}
+
+function objectKeys(value: unknown) {
+  return isRecord(value) ? Object.keys(value) : [];
+}
+
+function pick(record: Record<string, unknown>, keys: string[]) {
+  return Object.fromEntries(keys.filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
 }
 
 function safeJson(text: string) {
@@ -160,6 +215,10 @@ function safeJson(text: string) {
 
 function sanitize(text: string) {
   return apiKey ? text.replaceAll(apiKey, "[redacted]") : text;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function clampInt(value: number, min: number, max: number) {

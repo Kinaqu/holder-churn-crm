@@ -33,8 +33,8 @@ export async function POST(request: Request) {
   const token = await createToken({
     chain: validation.chain,
     address: validation.address,
-    symbol: safeOptionalString(body.symbol, 16) ?? "LIVE",
-    name: safeOptionalString(body.name, 80) ?? "Live Birdeye Token",
+    symbol: safeOptionalString(body.symbol, 16),
+    name: safeOptionalString(body.name, 80),
     decimals: Number.isFinite(Number(body.decimals)) ? Number(body.decimals) : 6
   });
 

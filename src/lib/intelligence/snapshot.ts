@@ -1,7 +1,7 @@
 import { getDemoDataset } from "@/lib/demo/demo-data";
 import { getBirdeyeClient, type BirdeyeResult } from "@/lib/birdeye/client";
 import { BIRDEYE_ENDPOINTS, type BirdeyeEndpointName, type BirdeyePackage } from "@/lib/birdeye/endpoints";
-import { normalizeHolders } from "@/lib/birdeye/normalizers";
+import { normalizeHolderPayload, type NormalizedTokenContext } from "@/lib/birdeye/normalizers";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 import { calculateSnapshotScores } from "@/lib/intelligence/scoring";
 import { generateAlerts } from "@/lib/intelligence/alerts";
@@ -86,26 +86,36 @@ export async function runManualSnapshot(input: {
     });
   }
 
+  const overview = await runOptionalSource("tokenOverview", chain, () => client.getTokenOverview(chain, address));
+  const metadata = await runOptionalSource("tokenMetadata", chain, () => client.getTokenMetadata(chain, address));
+  const totalSupplyFromContext = firstDefined(overview.ok ? overview.data.totalSupply : undefined, metadata.ok ? metadata.data.totalSupply : undefined);
+  const holderPayload = normalizeHolderPayload(holdersResult.data, { chain, totalSupply: totalSupplyFromContext });
   const distribution = await runOptionalSource("holderDistribution", chain, () => client.getHolderDistribution(chain, address));
   const price = await runOptionalSource("priceStats", chain, () => client.getPriceStats(chain, address));
   const security = await runOptionalSource("tokenSecurity", chain, () => client.getTokenSecurity(chain, address));
   const transfers = await runOptionalSource("tokenTransfers", chain, () => client.getTokenTransfers(chain, address, { limit: 50 }));
 
-  const holders = normalizeHolders(holdersResult.data);
+  const holders = holderPayload.holders;
+  const tokenContext = mergeTokenContext(overview.ok ? overview.data : undefined, metadata.ok ? metadata.data : undefined);
+  const realHolderCount = firstDefined(holderPayload.holderCount, distribution.ok ? distribution.data.holderCount : undefined, tokenContext.holderCount);
+  const top10SupplyPercent = firstDefined(distribution.ok ? distribution.data.top10SupplyPercent : undefined, tokenContext.top10SupplyPercent, sumHolderSupplyPercent(holders.slice(0, 10)));
+  const top50SupplyPercent = firstDefined(distribution.ok ? distribution.data.top50SupplyPercent : undefined, tokenContext.top50SupplyPercent, sumHolderSupplyPercent(holders.slice(0, 50)));
   const previousHolders = input.previousHolders ?? [];
   const previousSnapshots = input.previousSnapshots ?? [];
   const segments = previousHolders.length ? classifyHolderSegments(previousHolders, holders) : createBaselineSegments(holders);
   const currentSnapshot = calculateSnapshotScores({
     previousTrackedWallets: previousHolders.length,
     currentTrackedWallets: holders.length,
-    top10SupplyPercent: distribution.ok ? distribution.data.top10SupplyPercent : undefined,
-    top50SupplyPercent: distribution.ok ? distribution.data.top50SupplyPercent : undefined,
+    holderCount: realHolderCount,
+    top10SupplyPercent,
+    top50SupplyPercent,
     priceUsd: price.ok ? price.data.priceUsd : undefined,
     priceChange24h: price.ok ? price.data.priceChange24h : undefined,
+    unresolvedHolders: holderPayload.unresolvedHolders,
     segments
   });
 
-  const attemptedOptionalResults = [distribution, price, security, transfers].filter(isAttemptedSource);
+  const attemptedOptionalResults = [overview, metadata, distribution, price, security, transfers].filter(isAttemptedSource);
 
   const pipelineRun: PipelineRun = {
     id: input.runId ?? `run-${Date.now()}`,
@@ -124,6 +134,8 @@ export async function runManualSnapshot(input: {
     completedAt: new Date().toISOString(),
     sources: [
       { source: "Token Holder", status: "complete", detail: previousHolders.length ? `${holders.length} holders scanned` : `${holders.length} holders scanned; baseline snapshot`, calls: holdersResult.calls },
+      sourceStatus(overview, "token identity and market totals checked"),
+      sourceStatus(metadata, "token metadata checked"),
       sourceStatus(distribution, "concentration calculated"),
       sourceStatus(price, "market context added"),
       sourceStatus(security, "risk context added"),
@@ -138,9 +150,9 @@ export async function runManualSnapshot(input: {
       id: input.tokenId,
       chain,
       address,
-      symbol: input.token?.symbol ?? "LIVE",
-      name: input.token?.name ?? "Live Birdeye Token",
-      decimals: input.token?.decimals ?? 6,
+      symbol: tokenContext.symbol ?? safeExistingSymbol(input.token?.symbol) ?? shortTokenSymbol(address),
+      name: tokenContext.name ?? safeExistingName(input.token?.name) ?? "Unknown Solana Token",
+      decimals: tokenContext.decimals ?? input.token?.decimals ?? 6,
       securityStatus: security?.ok ? "clear" : "unknown",
       lastSnapshotAt: currentSnapshot.snapshotAt,
       createdAt: input.token?.createdAt,
@@ -286,6 +298,43 @@ function birdeyePackageLabel(): BirdeyePackage {
 
 function isBirdeyePackage(value: string): value is BirdeyePackage {
   return new Set(["standard", "lite", "starter", "premium", "business", "enterprise"]).has(value);
+}
+
+function mergeTokenContext(...contexts: Array<NormalizedTokenContext | undefined>): NormalizedTokenContext {
+  return contexts.reduce<NormalizedTokenContext>(
+    (merged, context) => ({
+      symbol: merged.symbol ?? context?.symbol,
+      name: merged.name ?? context?.name,
+      decimals: merged.decimals ?? context?.decimals,
+      holderCount: merged.holderCount ?? context?.holderCount,
+      totalSupply: merged.totalSupply ?? context?.totalSupply,
+      top10SupplyPercent: merged.top10SupplyPercent ?? context?.top10SupplyPercent,
+      top50SupplyPercent: merged.top50SupplyPercent ?? context?.top50SupplyPercent
+    }),
+    {}
+  );
+}
+
+function firstDefined<T>(...values: Array<T | undefined>) {
+  return values.find((value): value is T => value !== undefined);
+}
+
+function sumHolderSupplyPercent(holders: HolderSnapshot[]) {
+  const values = holders.map((holder) => holder.supplyPercent).filter((value): value is number => value !== undefined);
+  if (values.length === 0) return undefined;
+  return values.reduce((sum, value) => sum + value, 0);
+}
+
+function safeExistingSymbol(symbol?: string) {
+  return symbol && symbol !== "LIVE" ? symbol : undefined;
+}
+
+function safeExistingName(name?: string) {
+  return name && name !== "Live Birdeye Token" ? name : undefined;
+}
+
+function shortTokenSymbol(address: string) {
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }
 
 function createBaselineSegments(holders: HolderSnapshot[]): HolderSegment[] {

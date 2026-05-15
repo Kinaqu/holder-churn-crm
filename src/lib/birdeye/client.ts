@@ -5,10 +5,12 @@ import type { BirdeyeSource } from "@/lib/types";
 import {
   normalizeDistribution,
   normalizePriceStats,
+  normalizeTokenContext,
   normalizeTransfers,
   normalizeWalletCurrentNetWorth,
   type NormalizedHolderDistribution,
   type NormalizedPriceStats,
+  type NormalizedTokenContext,
   type NormalizedTokenTransfer,
   type NormalizedWalletCurrentNetWorth
 } from "@/lib/birdeye/normalizers";
@@ -103,6 +105,25 @@ class BirdeyeClient {
       }
     });
     return result.ok ? { ...result, data: normalizePriceStats(result.data) } : result;
+  }
+
+  async getTokenOverview(chain: string, tokenAddress: string): Promise<BirdeyeResult<NormalizedTokenContext>> {
+    const result = await this.request<unknown>("tokenOverview", {
+      chain,
+      query: {
+        address: tokenAddress,
+        ui_amount_mode: "scaled"
+      }
+    });
+    return result.ok ? { ...result, data: normalizeTokenContext(result.data) } : result;
+  }
+
+  async getTokenMetadata(chain: string, tokenAddress: string): Promise<BirdeyeResult<NormalizedTokenContext>> {
+    const result = await this.request<unknown>("tokenMetadata", {
+      chain,
+      query: { address: tokenAddress }
+    });
+    return result.ok ? { ...result, data: normalizeTokenContext(result.data) } : result;
   }
 
   async getTokenSecurity(chain: string, tokenAddress: string) {
