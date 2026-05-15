@@ -1,107 +1,375 @@
 # Holder Churn CRM
 
-Birdeye-powered retention intelligence for tokenized communities.
+**Birdeye-powered retention intelligence for Solana token communities.**
 
-Holder Churn CRM is not a token scanner, trading bot, or generic crypto dashboard. Birdeye is the data infrastructure. Holder Churn CRM is the retention intelligence and action layer on top: holder churn, whale confidence, campaign quality, explainable alerts, and Next Best Actions.
+Holder Churn CRM helps token teams understand **who is leaving, who is accumulating, where holder risk is building, and what action to take next**.
 
-This is analytics software, not financial advice.
+It is not a token scanner, trading bot, or generic crypto dashboard.  
+It is a **retention CRM layer for tokenized communities**, powered by Birdeye data.
 
-## What It Does
+> Analytics software only. Not financial advice.
 
-- Holder churn: identifies likely exits and reduced positions from consecutive holder snapshots.
-- Whale confidence: tracks top-holder accumulation and reduction pressure.
-- Distribution risk: uses holder concentration to explain fragility risk.
-- Campaign impact: compares persisted snapshots around campaign markers without inventing retention.
-- Source-verifiable alerts: attaches Birdeye sources, reasons, confidence, and Next Best Actions.
+---
 
-## Demo Walkthrough
+## Overview
 
-1. Open `/dashboard`.
-2. Show the Birdeye Intelligence Pipeline centerpiece.
-3. Open the Whale Reduced alert.
-4. Show Birdeye sources plus Next Best Actions.
-5. Open `/tokens/demo-birdeye` and review holder segments.
-6. Open the Campaigns tab.
-7. Show live “Needs more snapshots” behavior versus full labeled demo campaign data.
-8. Click `Run Snapshot` and show partial snapshot success in the Pipeline tab.
+Most crypto dashboards focus on price, volume, and short-term trading signals.
 
-## Why this is only possible with Birdeye
+Holder Churn CRM focuses on a different question:
+
+**Are our holders becoming stronger, weaker, or leaving?**
+
+The app takes Solana token holder data from Birdeye, persists holder snapshots, compares them over time, and turns raw on-chain changes into:
+
+- Holder churn signals
+- Whale accumulation/reduction alerts
+- Distribution risk scoring
+- Campaign impact analysis
+- Source-backed explanations
+- Next Best Actions for token teams
+
+---
+
+## Core Features
+
+### Holder Churn Detection
+
+The app compares consecutive holder snapshots and identifies wallets that are likely exiting or reducing exposure.
+
+Signals include:
+
+- New holders
+- Likely exited holders
+- Reduced positions
+- Increased positions
+- Whale reductions
+- Whale accumulation
+
+Because holder APIs often return tracked/top-holder snapshots, the app avoids overclaiming. Missing wallets are labeled as:
+
+> likely exited or dropped below tracked threshold
+
+---
+
+### Whale Confidence
+
+Holder Churn CRM tracks top-holder behavior and converts it into a clear confidence signal.
+
+Examples:
+
+- Whale accumulation increases confidence
+- Whale reduction decreases confidence
+- Top-holder pressure is surfaced as an alert
+- Explanations show the exact wallet and change behind the signal
+
+---
+
+### Distribution Risk
+
+The app uses holder concentration data to estimate how fragile a token’s holder base may be.
+
+For example:
+
+- Low top-10 concentration = healthier distribution
+- High top-10 concentration = higher fragility risk
+- Concentration changes are reflected in the holder health score
+
+---
+
+### Campaign Impact
+
+Token teams often run campaigns, quests, airdrops, posts, or launches without knowing whether they create real retention.
+
+Holder Churn CRM lets teams add campaign markers and compare snapshots around those events.
+
+The app does **not fake campaign results**.
+
+If there is not enough before/after snapshot history, the UI shows:
+
+- `Needs more snapshots`
+- `Preview`
+- Missing requirements
+
+This keeps the analytics honest.
+
+---
+
+### Source-Verifiable Alerts
+
+Alerts are not black-box predictions.
+
+Each alert includes:
+
+- Severity
+- Confidence
+- Reason
+- Related wallet or token metric
+- Birdeye source endpoints
+- Next Best Actions
+
+Example alert types:
+
+- Whale reduced
+- High churn pressure
+- Distribution fragility
+- Campaign retention weakness
+- Snapshot source unavailable
+
+---
+
+## Why Birdeye Is Core
 
 Holder Churn CRM is built around Birdeye as the core data infrastructure.
 
-Without Birdeye, the app would need to maintain its own blockchain indexer, token holder extractor, transfer parser, price history database, wallet enrichment pipeline, token security checks, and holder distribution analytics.
+Without Birdeye, this project would need to build and maintain:
 
-Birdeye provides the primitives that make this product possible:
+- Blockchain indexers
+- Token holder extractors
+- Holder distribution analytics
+- Transfer parsers
+- Wallet enrichment pipelines
+- Price history storage
+- Token security checks
+- Holder movement diffing infrastructure
 
-- Token Holder API -> holder snapshots
-- Holder Distribution -> concentration and distribution risk
-- Token Transfer -> churn and whale movement context
-- Wallet Balance Change -> selected wallet deep analysis
-- Wallet Net Worth -> holder quality context
-- Price Stats / Historical Price -> market context around churn
-- Token Security -> risk-adjusted holder health scoring
+Birdeye provides the raw primitives.  
+Holder Churn CRM converts them into retention intelligence.
 
-Holder Churn CRM turns these primitives into retention analytics, whale confidence, campaign attribution, explainable churn alerts, and source-backed actions.
+### Birdeye Data Used
+
+The project is designed around these Birdeye-powered sources:
+
+- **Token Holder API**  
+  Used for holder snapshots and wallet balance tracking.
+
+- **Holder Distribution**  
+  Used for concentration and distribution risk.
+
+- **Token Transfer**  
+  Used for movement context when available.
+
+- **Wallet Balance Change**  
+  Used for deeper analysis of selected priority wallets.
+
+- **Wallet Net Worth**  
+  Used for holder quality context.
+
+- **Price Stats / Historical Price**  
+  Used to understand churn in market context.
+
+- **Token Security**  
+  Used as optional risk context when supported by the Birdeye package.
+
+The product value is not just “calling an API.”  
+The value is turning multiple Birdeye primitives into an opinionated retention workflow.
+
+---
 
 ## Architecture
 
-```text
+```txt
 Birdeye Data API
   -> Server-side Birdeye client
   -> Snapshot runner
   -> Postgres persistence
-  -> Holder diff and segments
-  -> Scores, alerts, and actions
-  -> Dashboard
-```
+  -> Holder diff engine
+  -> Segment classifier
+  -> Score engine
+  -> Alert engine
+  -> Next Best Action engine
+  -> Dashboard UI
+````
 
-The MVP is snapshot-first, cache-aware, and designed around a safe internal target of 50 Birdeye requests per minute.
+The MVP is:
+
+* Snapshot-first
+* Server-side API key protected
+* Rate-limit aware
+* Persistence-backed
+* Demo-safe
+* Built for Solana token analysis
+
+---
+
+## Tech Stack
+
+* **Next.js 16**
+* **React 19**
+* **TypeScript**
+* **Tailwind CSS**
+* **Drizzle ORM**
+* **Neon / Postgres**
+* **Vercel**
+* **Birdeye Data API**
+* **Recharts**
+* **Zod**
+
+---
+
+## Product Flow
+
+1. User opens the dashboard.
+2. User scans a Solana token mint.
+3. The app stores the token.
+4. User runs a snapshot.
+5. The app calls Birdeye server-side.
+6. Holder data is persisted.
+7. A later snapshot creates real before/after comparison.
+8. The app generates:
+
+   * Holder segments
+   * Churn metrics
+   * Whale confidence
+   * Distribution risk
+   * Holder health score
+   * Alerts
+   * Next Best Actions
+
+---
+
+## Demo Walkthrough
+
+Recommended demo path:
+
+1. Open `/dashboard`
+2. Show the Birdeye Intelligence Pipeline
+3. Open a token workspace
+4. Show holder health, churn, whale confidence, and distribution risk
+5. Open the Whale Reduced alert
+6. Show source-backed reasons and Next Best Actions
+7. Open the Campaigns tab
+8. Show the difference between:
+
+   * demo campaign data
+   * live `Needs more snapshots` behavior
+9. Click `Run Snapshot`
+10. Show the Pipeline tab with source status, API usage, and partial success handling
+
+---
+
+## Pages
+
+| Route                            | Purpose                                       |
+| -------------------------------- | --------------------------------------------- |
+| `/`                              | Landing page and token scanner                |
+| `/dashboard`                     | Token workspace overview                      |
+| `/tokens/new`                    | Add or scan a token                           |
+| `/tokens/[tokenId]`              | Token intelligence dashboard                  |
+| `/methodology`                   | Explanation of scoring and segmentation       |
+| `/settings`                      | Environment and system configuration overview |
+| `/api/health`                    | Health check                                  |
+| `/api/tokens`                    | Token list and creation                       |
+| `/api/tokens/[id]`               | Token dataset                                 |
+| `/api/tokens/[id]/snapshot`      | Manual snapshot runner                        |
+| `/api/tokens/[id]/holders`       | Holder snapshots and segments                 |
+| `/api/tokens/[id]/alerts`        | Alerts                                        |
+| `/api/tokens/[id]/campaigns`     | Campaign markers and impact                   |
+| `/api/tokens/[id]/pipeline-runs` | Pipeline history                              |
+| `/api/cron/snapshot`             | Scheduled snapshot runner                     |
+
+---
 
 ## Snapshot Pipeline
 
-Required for live snapshot:
+A live snapshot starts with the required Birdeye holder source.
 
-- Token Holder
+### Required Source
 
-Optional sources:
+* Token Holder
 
-- Holder Distribution
-- Price Stats
-- Token Security (skipped on Birdeye Standard)
-- Token Transfer (Solana-only)
-- Wallet enrichment for only 5-10 priority wallets
+### Optional Sources
 
-Optional sources can fail without failing the snapshot. The Pipeline panel marks unavailable package/chain sources as skipped, marks temporary upstream failures as missing, and the dashboard continues with partial data.
+* Holder Distribution
+* Price Stats
+* Token Security
+* Token Transfer
+* Wallet enrichment for selected priority wallets
 
-MVP per-snapshot budget:
+Optional sources can fail without failing the entire snapshot.
 
-- Token Holder: 1-3 calls
-- Holder Distribution: 1 call
-- Price Stats: 1 call
-- Token Security: 0 calls on Standard; 1 call only on enabled higher packages
-- Token Transfers: 1-2 calls when the chain and package allow it
-- Wallet Enrichment: max 5-10 selected wallets
+If the main Token Holder source fails, the snapshot fails because holder data is required for meaningful churn analytics.
 
-## Methodology
+---
 
-Segmentation is deterministic:
+## Rate Limit Strategy
 
-- New Holder: present now, missing before.
-- Likely Exited: present before, missing now.
-- Whale Reduced: top 50 or above threshold and down more than 10%.
-- Whale Accumulated: top 50 or above threshold and up more than 10%.
-- Reduced/Increased Position: non-whale changes above 20%.
+The MVP is designed around a conservative internal budget:
 
-Missing wallets are labeled “likely exited or dropped below tracked threshold” because top-holder snapshots are thresholded.
+```txt
+50 Birdeye requests per minute
+```
 
-Scores are transparent heuristics, not fake ML:
+Default request settings:
 
-- Holder Churn Rate = likely exited / previous tracked wallets
-- Whale Confidence starts at 50, adds accumulation, subtracts reduction
-- Distribution Risk follows top 10 holder concentration bands
-- Holder Health combines retention stability, whale confidence, distribution health, returning activity, new holder quality, churn penalty, and security context when available
+```env
+BIRDEYE_ACCOUNT_RPS=1
+BIRDEYE_ACCOUNT_RPM=50
+BIRDEYE_WALLET_RPS=5
+BIRDEYE_WALLET_RPM=30
+```
+
+The snapshot runner keeps wallet enrichment selective so the app does not waste API budget on low-priority wallets.
+
+Expected MVP snapshot budget:
+
+| Source              |    Calls |
+| ------------------- | -------: |
+| Token Holder        |      1-3 |
+| Holder Distribution |        1 |
+| Price Stats         |        1 |
+| Token Security      |      0-1 |
+| Token Transfers     |      1-2 |
+| Wallet Enrichment   | 5-10 max |
+
+---
+
+## Scoring Methodology
+
+The app uses transparent heuristics, not fake ML.
+
+### Holder Churn Rate
+
+```txt
+likely exited holders / previous tracked holders
+```
+
+### Whale Confidence
+
+Starts at 50.
+
+* Adds confidence for whale accumulation
+* Subtracts confidence for whale reduction
+* Clamped between 0 and 100
+
+### Distribution Risk
+
+Based on top-holder concentration bands.
+
+Example:
+
+| Top 10 Concentration | Risk   |
+| -------------------: | ------ |
+|            Below 25% | Low    |
+|            25% - 50% | Medium |
+|            Above 50% | High   |
+
+### Holder Health
+
+Holder Health combines:
+
+* Retention stability
+* Whale confidence
+* Distribution health
+* Returning activity
+* New holder quality
+* Churn penalty
+* Security context when available
+
+---
 
 ## Environment Variables
+
+Create `.env.local`:
 
 ```env
 BIRDEYE_API_KEY=
@@ -120,72 +388,7 @@ BIRDEYE_WALLET_RPS=5
 BIRDEYE_WALLET_RPM=30
 ```
 
-`BIRDEYE_API_KEY` is server-only. All Birdeye calls go through `src/lib/birdeye/client.ts`.
-
-`BIRDEYE_ACCOUNT_RPS` defaults to `1` to stay compatible with Birdeye Standard package rate limits. Raise it only when the Birdeye package allows higher account-level throughput.
-
-`BIRDEYE_PACKAGE` defaults to `standard`. Token Security is never called on `standard`; it is shown as a planned skipped source and does not make the snapshot partial. On higher packages, Token Security still requires `BIRDEYE_TOKEN_SECURITY_ENABLED=true` so an accidentally overstated package env does not trigger unsupported calls. Optional sources that return `401` or `403` are cached as unavailable for the current key/package for several hours so later snapshots do not repeat known-inaccessible calls.
-
-To verify the Solana-only holder endpoints with the exact runtime key, run:
-
-```bash
-npm run birdeye:check -- --address <SOLANA_TOKEN_MINT>
-```
-
-The diagnostic checks Token Holder as a baseline, Token Overview/Metadata for token identity, then Holder Distribution and Token Transfer. It prints status codes, response previews, schema keys, candidate identity/count/supply/holder fields, and rate-limit/auth headers without printing the API key.
-
-If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly states data is not persisted. If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can be read from the database but live snapshots return `BIRDEYE_API_KEY_MISSING`.
-
-## Vercel Cron
-
-`vercel.json` schedules:
-
-```json
-{
-  "path": "/api/cron/snapshot",
-  "schedule": "0 0 * * *"
-}
-```
-
-The route requires:
-
-```http
-Authorization: Bearer ${CRON_SECRET}
-```
-
-Cron processes only a tiny batch per run. Manual snapshot remains the primary MVP path.
-
-Cron behavior:
-
-- `CRON_SECRET` missing -> `CRON_SECRET_MISSING`
-- invalid bearer token -> `UNAUTHORIZED`
-- `DATABASE_URL` missing -> `DATABASE_NOT_CONFIGURED`
-- `BIRDEYE_API_KEY` missing -> `BIRDEYE_API_KEY_MISSING`
-- default batch size is 2 live tokens, capped at 3
-- one token failure is recorded in that token's `pipeline_runs` and does not fail the whole batch
-
-Manual snapshots remain the recommended path for demos and first live verification.
-
-## Commands
-
-```bash
-npm install
-npm run db:generate
-npm run db:migrate
-npm run db:push
-npm run db:studio
-npm run dev
-npm run seed:demo
-npm run typecheck
-npm run lint
-npm run build
-```
-
-Use `npm run db:push` for the fastest MVP setup against a fresh Neon/Postgres database. Use `npm run db:generate` and `npm run db:migrate` when you want a migration artifact workflow.
-
-## Deployment
-
-Required Vercel environment variables:
+### Required for Live Mode
 
 ```env
 BIRDEYE_API_KEY=
@@ -194,7 +397,7 @@ CRON_SECRET=
 NEXT_PUBLIC_APP_URL=
 ```
 
-Optional environment variables:
+### Optional
 
 ```env
 UPSTASH_REDIS_REST_URL=
@@ -208,58 +411,317 @@ BIRDEYE_WALLET_RPS=
 BIRDEYE_WALLET_RPM=
 ```
 
-Live deployment checklist:
+---
+
+## Important Environment Notes
+
+`BIRDEYE_API_KEY` is server-only.
+
+The app does not expose a wildcard Birdeye proxy.
+All allowed Birdeye calls go through the server-side client and endpoint allowlist.
+
+If `DATABASE_URL` is missing, the app runs in deterministic demo mode.
+
+If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can still be read from the database, but live snapshots return:
+
+```txt
+BIRDEYE_API_KEY_MISSING
+```
+
+If `BIRDEYE_PACKAGE=standard`, Token Security is skipped unless explicitly enabled for a supported package.
+
+---
+
+## Installation
+
+```bash
+npm install
+```
+
+---
+
+## Development
+
+```bash
+npm run dev
+```
+
+Open:
+
+```txt
+http://localhost:3000
+```
+
+---
+
+## Database Setup
+
+For fastest MVP setup with Neon/Postgres:
+
+```bash
+npm run db:push
+```
+
+For migration workflow:
+
+```bash
+npm run db:generate
+npm run db:migrate
+```
+
+Open Drizzle Studio:
+
+```bash
+npm run db:studio
+```
+
+---
+
+## Birdeye Endpoint Diagnostic
+
+To verify Solana Birdeye endpoints with your runtime API key:
+
+```bash
+npm run birdeye:check -- --address <SOLANA_TOKEN_MINT>
+```
+
+Optional:
+
+```bash
+npm run birdeye:check -- --address <SOLANA_TOKEN_MINT> --limit 10
+```
+
+The diagnostic checks:
+
+* Token Holder baseline
+* Token Overview
+* Token Metadata
+* Holder Distribution
+* Token Transfer
+
+It prints response status, schema keys, candidate fields, and rate-limit headers without printing the API key.
+
+---
+
+## Commands
+
+```bash
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run typecheck
+
+npm run db:generate
+npm run db:migrate
+npm run db:push
+npm run db:studio
+
+npm run birdeye:check
+```
+
+---
+
+## Deployment
+
+The app is designed for Vercel.
+
+### Vercel Setup
+
+Set these environment variables in Vercel:
+
+```env
+BIRDEYE_API_KEY=
+DATABASE_URL=
+CRON_SECRET=
+NEXT_PUBLIC_APP_URL=
+```
+
+Optional:
+
+```env
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+DEMO_MODE=
+BIRDEYE_PACKAGE=
+BIRDEYE_TOKEN_SECURITY_ENABLED=
+BIRDEYE_ACCOUNT_RPS=
+BIRDEYE_ACCOUNT_RPM=
+BIRDEYE_WALLET_RPS=
+BIRDEYE_WALLET_RPM=
+```
+
+### Live Deployment Checklist
 
 1. Create a Neon/Postgres database.
-2. Set `DATABASE_URL` in Vercel and locally for setup.
-3. Run `npm run db:push` against the production database, or use `npm run db:generate` then `npm run db:migrate`.
+2. Set `DATABASE_URL` locally and in Vercel.
+3. Run:
+
+```bash
+npm run db:push
+```
+
 4. Set `BIRDEYE_API_KEY`.
 5. Set `CRON_SECRET`.
 6. Deploy to Vercel.
-7. Add a live token through `/tokens/new`.
+7. Add a live token from `/tokens/new`.
 8. Run a manual snapshot from `/tokens/[tokenId]`.
-9. Run a second snapshot later to see real diff-based holder segments and alerts.
-10. Verify the Pipeline panel shows persisted source status, run history, and API usage.
+9. Run a second snapshot later to generate real holder diff data.
+10. Review the Pipeline tab for source status and API usage.
 
-Demo deploy mode:
+---
 
-- Leave `DATABASE_URL` unset, or set `DEMO_MODE=true`.
-- The app serves deterministic demo data and clearly states that data is not persisted.
-- Live token creation and campaign marker creation are not persisted in this mode.
+## Vercel Cron
 
-Live deploy mode:
+`vercel.json` schedules:
 
-- Set `DATABASE_URL`, `BIRDEYE_API_KEY`, and `CRON_SECRET`.
-- `DEMO_MODE` should be unset or `false`.
-- Campaign markers are saved to Postgres.
-- Campaign impact is calculated on read from persisted holder/token snapshots. If there is not enough snapshot history, the UI shows `Needs more snapshots` or `preview` instead of fake 24h/7d retention.
+```json
+{
+  "path": "/api/cron/snapshot",
+  "schedule": "0 0 * * *"
+}
+```
 
-Common failure states:
+The cron endpoint requires:
 
-- Missing API key: live snapshot and cron return `BIRDEYE_API_KEY_MISSING`.
-- Missing database: live persistence routes return `DATABASE_NOT_CONFIGURED`.
-- Insufficient campaign history: campaign impact returns `needs_more_snapshots` or `preview` with missing requirements.
-- Optional Birdeye source missing: snapshot is partial; holder data is still saved if Token Holder succeeded.
-- Token Holder source missing: snapshot fails, no fake holder snapshots are saved, and the failed pipeline run is recorded.
+```http
+Authorization: Bearer <CRON_SECRET>
+```
 
-## Security Notes
+Cron behavior:
 
-- No wildcard Birdeye proxy.
-- Endpoint allowlist lives in `src/lib/birdeye/endpoints.ts`.
-- API key is read only in server code.
-- Query params are validated.
-- Errors are sanitized to avoid secret leakage.
-- Upstash Redis is used for rate limiting when configured; local memory is only fallback for local/dev/demo.
+| State                | Response                    |
+| -------------------- | --------------------------- |
+| Missing secret       | `CRON_SECRET_MISSING`       |
+| Invalid bearer token | `UNAUTHORIZED`              |
+| Missing database     | `DATABASE_NOT_CONFIGURED`   |
+| Missing Birdeye key  | `BIRDEYE_API_KEY_MISSING`   |
+| Token failure        | Recorded in `pipeline_runs` |
+| API budget reached   | Token skipped safely        |
 
-## Production Deferred
+Manual snapshots remain the recommended path for demos and first live verification.
 
-The MVP intentionally defers advanced queues, campaign impact report storage, complex multi-project tenancy, and deep wallet enrichment history. Those are documented as production enhancements so they do not block the polished hackathon demo.
+---
+
+## Demo Mode
+
+Demo mode is useful for hackathon judging, local review, and public demos.
+
+Enable it with:
+
+```env
+DEMO_MODE=true
+```
+
+Or leave `DATABASE_URL` unset.
+
+In demo mode:
+
+* The app serves deterministic demo data
+* Live persistence is disabled
+* Token creation is not persisted
+* Campaign markers are not persisted
+* The UI clearly states that data is not live-persisted
+
+---
+
+## Live Mode
+
+Live mode requires:
+
+```env
+DATABASE_URL=
+BIRDEYE_API_KEY=
+CRON_SECRET=
+```
+
+In live mode:
+
+* Tokens are saved to Postgres
+* Manual snapshots are persisted
+* Holder snapshots are stored
+* Holder segments are generated from real snapshot diffs
+* Alerts are stored
+* Pipeline runs are recorded
+* Campaign markers are saved
+* Campaign impact is calculated from persisted snapshots
+
+---
+
+## Security
+
+Security decisions:
+
+* Birdeye API key is server-only
+* No wildcard API proxy
+* Endpoint allowlist for Birdeye calls
+* Query params are validated
+* Errors are sanitized
+* Secrets are never returned to the client
+* Optional Redis rate limiter supports shared deployment limits
+* Local memory rate limiting is used only as fallback for local/dev/demo
+
+---
+
+## Common Failure States
+
+| Problem                             | Result                     |
+| ----------------------------------- | -------------------------- |
+| Missing Birdeye API key             | `BIRDEYE_API_KEY_MISSING`  |
+| Missing database                    | `DATABASE_NOT_CONFIGURED`  |
+| Invalid token address               | `INVALID_TOKEN_ADDRESS`    |
+| Token Holder source failed          | Snapshot fails             |
+| Optional Birdeye source unavailable | Snapshot becomes partial   |
+| Not enough campaign history         | `Needs more snapshots`     |
+| Persistence write failed            | `PERSISTENCE_WRITE_FAILED` |
+
+---
 
 ## Known Limitations
 
-- Holder snapshots are top-holder snapshots, not a full historical warehouse.
-- Missing wallets are labeled likely exited or dropped below the tracked threshold.
-- Wallet enrichment is selective and skipped when budget is tight.
-- Campaign impact needs real before/after snapshots; 24h and 7d retention remain pending until the required windows exist.
-- Scores are transparent heuristics, not ML predictions.
-- This is analytics software, not financial advice.
+* Holder snapshots are tracked/top-holder snapshots, not a full historical warehouse.
+* Missing wallets may have exited or dropped below the tracked threshold.
+* Wallet enrichment is selective to protect API budget.
+* Campaign impact needs real before/after snapshots.
+* 24h and 7d campaign retention require enough historical data.
+* Scores are transparent heuristics, not ML predictions.
+* Token Security depends on Birdeye package support.
+* This is analytics software, not financial advice.
+
+---
+
+## Production Deferred
+
+The MVP intentionally defers:
+
+* Advanced background queues
+* Multi-project tenancy
+* Full wallet enrichment history
+* Stored campaign impact reports
+* Full historical holder warehouse
+* Complex team permissions
+* Advanced alert notification channels
+
+These are production enhancements and do not block the hackathon MVP.
+
+---
+
+## Why This Matters
+
+Crypto teams often know price, volume, and market cap.
+
+They often do not know:
+
+* Which holders are quietly leaving
+* Whether whales are losing confidence
+* Whether campaigns create real retention
+* Whether holder concentration is becoming dangerous
+* Which wallets need attention before churn gets worse
+
+Holder Churn CRM turns Birdeye’s on-chain data into a practical retention workflow for token teams.
+
+---
+
+## License
+
+MIT
