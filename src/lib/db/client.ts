@@ -10,7 +10,7 @@ export function hasDatabase() {
 
 export function getDb() {
   if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is not configured. Demo mode is not persisted.");
+    throw new Error("DATABASE_URL is not configured.");
   }
 
   const sql = neon(process.env.DATABASE_URL);

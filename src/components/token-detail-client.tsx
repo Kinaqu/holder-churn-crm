@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { AlertTriangle, BarChart3, Bell, Copy, Database, Play, Settings, Target, Users } from "lucide-react";
+import { AlertTriangle, BarChart3, Bell, Copy, Database, Play, Settings, ShieldCheck, Target, Users, WalletCards } from "lucide-react";
 import type { CampaignImpact, TokenDataset } from "@/lib/types";
 import { AlertList } from "@/components/alert-list";
 import { ChurnChart, DistributionChart, HealthVsPriceChart, HolderTrendChart, WhaleConfidenceChart } from "@/components/charts/product-charts";
@@ -42,8 +42,6 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
   const latest = dataset.snapshots.at(-1)!;
   const isBaselineSnapshot = dataset.pipelineRun.mode === "live" && dataset.holders.length > 0 && dataset.segments.every((segment) => segment.segment === "BASELINE_HOLDER");
 
-  const modeLabel = dataset.pipelineRun.mode === "demo" ? "Demo mode: data is deterministic and not persisted" : "Live mode";
-
   function runSnapshot() {
     setSnapshotMessage(null);
     setSnapshotError(null);
@@ -70,35 +68,53 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-5 rounded-lg border border-signal-cyan/25 bg-signal-cyan/10 px-4 py-3 text-sm text-signal-cyan">{modeLabel}</div>
-      {isBaselineSnapshot ? <div className="mb-5 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">Baseline snapshot - run another snapshot to calculate churn.</div> : null}
-      {snapshotError ? <div className="mb-5 rounded-lg border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200">{snapshotError}</div> : null}
-      {snapshotMessage ? <div className="mb-5 rounded-lg border border-signal-amber/30 bg-signal-amber/10 px-4 py-3 text-sm text-signal-amber">{snapshotMessage}</div> : null}
-      <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold text-white">{dataset.token.name}</h1>
-            <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300">{dataset.token.symbol}</span>
-            <RiskBadge severity={dataset.token.securityStatus} />
+      {isBaselineSnapshot ? <StatusNotice tone="warn" message="Baseline snapshot collected. Run another snapshot to calculate churn." /> : null}
+      {snapshotError ? <StatusNotice tone="bad" message={snapshotError} /> : null}
+      {snapshotMessage ? <StatusNotice tone="warn" message={snapshotMessage.replace("SNAPSHOT_COMPLETED: ", "").replace("PARTIAL_SNAPSHOT_COMPLETED: ", "")} /> : null}
+
+      <header className="panel rounded-lg p-5">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-md border border-signal-cyan/25 bg-signal-cyan/10 text-sm font-semibold text-signal-cyan">
+                {dataset.token.symbol.slice(0, 3)}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-3xl font-semibold text-white">{dataset.token.name}</h1>
+                  <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-sm text-slate-300">{dataset.token.symbol}</span>
+                  <RiskBadge severity={dataset.token.securityStatus} />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-slate-400">
+                  <span className="inline-flex items-center gap-1.5 rounded border border-signal-cyan/25 bg-signal-cyan/10 px-2 py-1 text-xs font-medium text-signal-cyan">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Solana
+                  </span>
+                  <TokenAddress value={dataset.token.address} />
+                  <button className="inline-flex items-center gap-1 text-slate-300 transition hover:text-white focus:outline-none focus:ring-2 focus:ring-signal-cyan/60" onClick={() => navigator.clipboard.writeText(dataset.token.address)}>
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </button>
+                  <span>Last snapshot {relativeTimeLabel(dataset.token.lastSnapshotAt)}</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-400">
-            <span className="capitalize">{dataset.token.chain}</span>
-            <TokenAddress value={dataset.token.address} />
-            <button className="flex items-center gap-1 text-slate-300 transition hover:text-white" onClick={() => navigator.clipboard.writeText(dataset.token.address)}>
-              <Copy className="h-3.5 w-3.5" />
-              Copy
-            </button>
-            <span>Last snapshot {relativeTimeLabel(dataset.token.lastSnapshotAt)}</span>
-          </div>
+          <button
+            onClick={runSnapshot}
+            disabled={isPending}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-signal-cyan px-4 py-2.5 text-sm font-semibold text-graphite-950 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-signal-cyan/70 focus:ring-offset-2 focus:ring-offset-graphite-950 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Play className="h-4 w-4" />
+            {isPending ? "Running snapshot..." : "Run snapshot"}
+          </button>
         </div>
-        <button
-          onClick={runSnapshot}
-          disabled={isPending}
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-signal-cyan px-4 py-2.5 text-sm font-semibold text-graphite-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Play className="h-4 w-4" />
-          {isPending ? "Running snapshot..." : "Run Snapshot"}
-        </button>
+
+        <div className="mt-5 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
+          <HeaderStat icon={Users} label="Tracked holders" value={(latest.trackedHolderCount ?? dataset.holders.length).toLocaleString()} />
+          <HeaderStat icon={WalletCards} label="Top 10 supply" value={formatOptionalPercent(latest.top10SupplyPercent)} />
+          <HeaderStat icon={Database} label="Pipeline calls" value={`${dataset.pipelineRun.apiCallsUsed}/${dataset.pipelineRun.apiSafeBudget}`} />
+        </div>
       </header>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -108,20 +124,25 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
         <MetricCard label="Distribution Risk" value={latest.distributionRiskScore} detail={`Top 10 supply: ${formatOptionalPercent(latest.top10SupplyPercent)}`} icon={Database} tone={latest.distributionRiskScore > 65 ? "bad" : "warn"} />
       </div>
 
-      <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              className={cn("flex items-center gap-2 border-b-2 px-3 py-3 text-sm transition", activeTab === tab.id ? "border-signal-cyan text-white" : "border-transparent text-slate-400 hover:text-white")}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <Icon className="h-4 w-4" />
-              {tab.label}
-            </button>
-          );
-        })}
+      <div className="mt-6 overflow-x-auto rounded-lg border border-white/10 bg-graphite-900/65 p-1">
+        <div className="flex min-w-max gap-1">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                className={cn(
+                  "inline-flex min-h-10 items-center gap-2 rounded-md px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-signal-cyan/60",
+                  activeTab === tab.id ? "bg-white text-graphite-950" : "text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                )}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="mt-6">
@@ -132,6 +153,26 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
         {activeTab === "pipeline" ? <Pipeline dataset={dataset} /> : null}
         {activeTab === "settings" ? <SettingsTab /> : null}
       </div>
+    </div>
+  );
+}
+
+function StatusNotice({ tone, message }: { tone: "warn" | "bad"; message: string }) {
+  return (
+    <div className={cn("mb-5 rounded-lg border px-4 py-3 text-sm", tone === "warn" ? "border-signal-amber/30 bg-signal-amber/10 text-signal-amber" : "border-signal-rose/30 bg-signal-rose/10 text-red-200")}>
+      {message}
+    </div>
+  );
+}
+
+function HeaderStat({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-white/[0.035] p-3">
+      <div className="flex items-center gap-2 text-xs text-slate-500">
+        <Icon className="h-3.5 w-3.5 text-signal-cyan" />
+        {label}
+      </div>
+      <p className="mt-2 text-sm font-semibold text-white">{value}</p>
     </div>
   );
 }
@@ -381,17 +422,26 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 }
 
 function SettingsTab() {
+  const settings = [
+    ["Chain", "Solana only"],
+    ["Whale rank threshold", "Top 50"],
+    ["Whale supply threshold", "1%"],
+    ["Reduction threshold", "10% whales, 20% holders"],
+    ["Safe API budget", "50 requests/minute"],
+    ["Snapshot cadence", "Manual run"]
+  ];
+
   return (
     <section className="panel rounded-lg p-5">
-      <h2 className="text-xl font-semibold text-white">Snapshot Settings</h2>
-      <p className="mt-1 text-sm text-slate-400">MVP defaults are conservative and Birdeye API-limit aware.</p>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Snapshot Settings</h2>
+          <p className="mt-1 text-sm text-slate-400">Conservative defaults for Solana holder snapshots and Birdeye API budget.</p>
+        </div>
+        <span className="w-fit rounded-md border border-signal-cyan/25 bg-signal-cyan/10 px-2.5 py-1 text-xs font-medium text-signal-cyan">Read-only</span>
+      </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        {[
-          ["Whale rank threshold", "Top 50"],
-          ["Whale supply threshold", "1%"],
-          ["Reduction threshold", "10% whales, 20% holders"],
-          ["Safe API budget", "50 requests/minute"]
-        ].map(([label, value]) => (
+        {settings.map(([label, value]) => (
           <div key={label} className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
             <p className="text-sm text-slate-400">{label}</p>
             <p className="mt-2 font-semibold text-white">{value}</p>

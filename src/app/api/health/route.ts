@@ -3,7 +3,8 @@ import { okResponse } from "@/lib/api-response";
 export async function GET() {
   return okResponse({
     app: "Holder Churn CRM",
-    mode: process.env.DEMO_MODE === "true" || !process.env.DATABASE_URL ? "demo" : "live",
+    mode: "live",
+    storage: process.env.DATABASE_URL ? "configured" : "missing",
     timestamp: new Date().toISOString()
   });
 }

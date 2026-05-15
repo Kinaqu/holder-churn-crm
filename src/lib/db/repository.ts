@@ -4,7 +4,6 @@ import { and, desc, eq, lt } from "drizzle-orm";
 import { getDb, hasDatabase } from "@/lib/db/client";
 import { d1Batch, d1Query, hasD1 } from "@/lib/db/d1-client";
 import { alerts, apiCallLogs, campaignMarkers, holderSegments, holderSnapshots, pipelineRuns, tokenSnapshots, tokens } from "@/lib/db/schema";
-import { getDemoDataset } from "@/lib/demo/demo-data";
 import { createStableTokenId } from "@/lib/tokens";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 import type { Alert, ApiCallLog, CampaignImpact, CampaignImpactMetrics, CampaignMarker, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
@@ -112,12 +111,8 @@ export function hasPersistentStore() {
   return hasDatabase();
 }
 
-export function isDemoTokenMode() {
-  return process.env.DEMO_MODE === "true" || !hasPersistentStore();
-}
-
 export async function listTokens(): Promise<Token[]> {
-  if (isDemoTokenMode()) return [getDemoDataset().token];
+  if (!hasPersistentStore()) return [];
 
   if (hasDatabase()) {
     const rows = await getDb().select().from(tokens).orderBy(tokens.updatedAt).limit(100);
@@ -139,8 +134,7 @@ export async function listLiveTokensForSnapshotBatch(limit = 3): Promise<Token[]
 }
 
 export async function getToken(id: string): Promise<Token | null> {
-  if (id === getDemoDataset().token.id) return getDemoDataset().token;
-  if (isDemoTokenMode()) return id === getDemoDataset().token.id ? getDemoDataset().token : null;
+  if (!hasPersistentStore()) return null;
 
   if (hasDatabase()) {
     const rows = await getDb().select().from(tokens).where(eq(tokens.id, id)).limit(1);
@@ -307,7 +301,6 @@ export async function getHolderSnapshotHistory(tokenId: string): Promise<HolderS
 }
 
 export async function getTokenDataset(tokenId: string): Promise<TokenDataset | null> {
-  if (tokenId === getDemoDataset().token.id) return getDemoDataset();
   if (!hasPersistentStore()) return null;
 
   const token = await getToken(tokenId);
