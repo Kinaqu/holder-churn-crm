@@ -1,13 +1,8 @@
 import { errorResponse, okResponse } from "@/lib/api-response";
 import { createCampaign, getCampaignImpactsByToken, getToken, hasPersistentStore } from "@/lib/db/repository";
-import { getDemoDataset } from "@/lib/demo/demo-data";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
-
-  if (id === getDemoDataset().token.id) {
-    return okResponse({ campaigns: getDemoDataset().campaigns, demo: true });
-  }
 
   if (!hasPersistentStore()) {
     return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
@@ -19,16 +14,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   const campaigns = await getCampaignImpactsByToken(id);
-  return okResponse({ campaigns, demo: false });
+  return okResponse({ campaigns });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-
-  if (id === getDemoDataset().token.id) {
-    return errorResponse("DATABASE_NOT_CONFIGURED", "Demo campaign markers are deterministic and are not persisted.", 503);
-  }
 
   if (!hasPersistentStore()) {
     return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404);
@@ -51,7 +42,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const campaigns = await getCampaignImpactsByToken(id);
-    return okResponse({ campaign, campaigns, demo: false }, { status: 201 });
+    return okResponse({ campaign, campaigns }, { status: 201 });
   } catch (error) {
     console.error("Campaign marker create failed", error);
     return errorResponse("CAMPAIGN_CREATE_FAILED", "Campaign marker could not be saved.", 500);

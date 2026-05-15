@@ -1,4 +1,3 @@
-import { getDemoDataset } from "@/lib/demo/demo-data";
 import { getBirdeyeClient, type BirdeyeResult } from "@/lib/birdeye/client";
 import { BIRDEYE_ENDPOINTS, type BirdeyeEndpointName, type BirdeyePackage } from "@/lib/birdeye/endpoints";
 import { normalizeHolderPayload, type NormalizedTokenContext } from "@/lib/birdeye/normalizers";
@@ -38,15 +37,11 @@ export async function runManualSnapshot(input: {
   chain: string;
   address: string;
   token?: Token;
-  mode?: "demo" | "live";
+  mode?: "live";
   previousHolders?: HolderSnapshot[];
   previousSnapshots?: TokenSnapshot[];
   runId?: string;
 }): Promise<TokenDataset> {
-  if (input.mode === "demo") {
-    return getDemoDataset();
-  }
-
   const startedAt = new Date();
   const client = getBirdeyeClient();
   const chain = input.chain;
@@ -181,10 +176,6 @@ function toApiCallLogs(results: Array<{ sourceLabel: string; statusCode?: number
     errorMessage: result.ok ? undefined : result.error,
     createdAt
   }));
-}
-
-export function isDemoMode() {
-  return process.env.DEMO_MODE === "true";
 }
 
 async function runOptionalSource<T>(endpointName: BirdeyeEndpointName, chain: string, request: () => Promise<BirdeyeResult<T>>): Promise<OptionalSourceResult<T>> {

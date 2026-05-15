@@ -89,7 +89,7 @@ export type PipelineSourceStatus = {
 export type PipelineRun = {
   id: string;
   status: "complete" | "partial" | "failed" | "running";
-  mode: "demo" | "live";
+  mode: "live";
   apiCallsUsed: number;
   apiSafeBudget: number;
   holdersScanned: number;
@@ -133,7 +133,7 @@ export type CampaignMarker = {
   startedAt: string;
   endedAt?: string;
   createdAt: string;
-  mode: "demo" | "live";
+  mode: "live";
   newHolders?: number;
   retained24h?: number;
   retained7d?: number;

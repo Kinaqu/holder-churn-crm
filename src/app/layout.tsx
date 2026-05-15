@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { Search } from "lucide-react";
 import "./globals.css";
 
 const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
@@ -22,13 +23,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <span className="text-sm font-semibold tracking-wide text-white">Holder Churn CRM</span>
             </Link>
             <div className="hidden items-center gap-6 text-sm text-slate-300 md:flex">
+              <Link className="hover:text-white" href="/tokens/new">Scan token</Link>
               <Link className="hover:text-white" href="/dashboard">Dashboard</Link>
-              <Link className="hover:text-white" href="/tokens/new">Add token</Link>
               <Link className="hover:text-white" href="/methodology">Methodology</Link>
               <Link className="hover:text-white" href="/settings">Settings</Link>
             </div>
-            <Link href="/dashboard" className="rounded-md bg-white px-3 py-2 text-sm font-medium text-graphite-950 transition hover:bg-signal-cyan">
-              View demo
+            <Link href="/tokens/new" className="inline-flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-medium text-graphite-950 transition hover:bg-signal-cyan">
+              <Search className="h-4 w-4" />
+              Scan
             </Link>
           </nav>
         </div>

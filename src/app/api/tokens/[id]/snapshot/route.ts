@@ -1,7 +1,6 @@
 import { errorResponse, okResponse } from "@/lib/api-response";
-import { runManualSnapshot } from "@/lib/intelligence/snapshot";
 import { runPersistedLiveSnapshot } from "@/lib/intelligence/live-snapshot";
-import { getToken, getTokenDataset, isDemoTokenMode } from "@/lib/db/repository";
+import { getToken, getTokenDataset } from "@/lib/db/repository";
 import type { Token } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -17,17 +16,6 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       return errorResponse("TOKEN_NOT_FOUND", "Token was not found.", 404, { partial: false });
     }
 
-    if (token.id === "demo-birdeye" || isDemoTokenMode()) {
-      const dataset = await runManualSnapshot({
-        tokenId: token.id,
-        chain: token.chain,
-        address: token.address,
-        token,
-        mode: "demo"
-      });
-      return okResponse({ dataset, partial: dataset.pipelineRun.status === "partial" });
-    }
-
     const dataset = await runPersistedLiveSnapshot(token);
 
     return okResponse({
@@ -38,7 +26,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "SNAPSHOT_FAILED";
     const status = error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : 500;
-    const dataset = tokenForError && tokenForError.id !== "demo-birdeye" ? await getTokenDataset(tokenForError.id).catch(() => null) : null;
+    const dataset = tokenForError ? await getTokenDataset(tokenForError.id).catch(() => null) : null;
     console.error("Snapshot failed", error);
     return errorResponse(code, publicSnapshotMessage(code, error), status, { partial: false, dataset: dataset ?? undefined });
   }

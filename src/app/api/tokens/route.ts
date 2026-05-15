@@ -1,11 +1,10 @@
 import { errorResponse, okResponse } from "@/lib/api-response";
-import { getDemoDataset } from "@/lib/demo/demo-data";
-import { createToken, hasPersistentStore, isDemoTokenMode, listTokens } from "@/lib/db/repository";
+import { createToken, hasPersistentStore, listTokens } from "@/lib/db/repository";
 import { normalizeAndValidateTokenInput } from "@/lib/tokens";
 
 export async function GET() {
   const tokens = await listTokens();
-  return okResponse({ tokens, demo: isDemoTokenMode(), persistent: hasPersistentStore() });
+  return okResponse({ tokens, persistent: hasPersistentStore() });
 }
 
 export async function POST(request: Request) {
@@ -16,18 +15,8 @@ export async function POST(request: Request) {
     return errorResponse(validation.code, validation.message, 400);
   }
 
-  if (isDemoTokenMode()) {
-    return okResponse({
-      token: getDemoDataset().token,
-      demo: true,
-      persistent: false,
-      warning: {
-        code: hasPersistentStore() ? "DEMO_MODE_ENABLED" : "DATABASE_NOT_CONFIGURED",
-        message: hasPersistentStore()
-          ? "DEMO_MODE is enabled, so token creation is routed to the deterministic demo token."
-          : "No persistent database is configured. The app is using deterministic demo mode and will not persist this token."
-      }
-    });
+  if (!hasPersistentStore()) {
+    return errorResponse("DATABASE_NOT_CONFIGURED", "DATABASE_URL is required to scan and persist tokens.", 503);
   }
 
   const token = await createToken({
@@ -38,7 +27,7 @@ export async function POST(request: Request) {
     decimals: Number.isFinite(Number(body.decimals)) ? Number(body.decimals) : 6
   });
 
-  return okResponse({ token, demo: false, persistent: true }, { status: 201 });
+  return okResponse({ token, persistent: true }, { status: 201 });
 }
 
 async function readTokenRequestBody(request: Request) {

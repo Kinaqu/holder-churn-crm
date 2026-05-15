@@ -6,19 +6,18 @@ export function BirdeyePipelineCard({ run, large = false }: { run: PipelineRun; 
   return (
     <section className={cn("panel relative overflow-hidden rounded-lg p-5", large && "p-6")}>
       <div className="absolute inset-0 grid-overlay opacity-60" />
-      <div className="beam left-16 top-28 w-3/4" />
       <div className="relative">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
           <div>
             <p className="text-xs uppercase tracking-[0.22em] text-signal-cyan">Birdeye Intelligence Pipeline</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">No custom indexer required</h2>
+            <h2 className="mt-2 text-xl font-semibold text-white">Snapshot source coverage</h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-400">
               Birdeye provides holder, transfer, distribution, price, wallet, and security primitives. Holder Churn CRM turns them into retention cohorts, risk signals, and actions.
             </p>
           </div>
-          <div className="rounded-md border border-signal-cyan/25 bg-signal-cyan/10 px-3 py-2 text-sm text-signal-cyan">
-            {run.status === "partial" ? "Partial snapshot success" : run.status}
-          </div>
+            <div className="w-fit rounded-md border border-signal-cyan/25 bg-signal-cyan/10 px-3 py-2 text-sm text-signal-cyan">
+              {run.status === "partial" ? "Partial snapshot success" : run.status}
+            </div>
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-2">
