@@ -161,8 +161,8 @@ export async function createToken(input: { chain: string; address: string; symbo
     id,
     chain: input.chain,
     address: input.address,
-    symbol: input.symbol || "LIVE",
-    name: input.name || "Live Birdeye Token",
+    symbol: input.symbol || shortTokenSymbol(input.address),
+    name: input.name || "Unknown Solana Token",
     decimals: input.decimals ?? 6,
     securityStatus: "unknown",
     lastSnapshotAt: now,
@@ -605,7 +605,7 @@ export async function saveHolderSnapshots(tokenId: string, runId: string, holder
       walletAddress: holder.walletAddress,
       balance: decimal(holder.balance),
       balanceUsd: decimal(holder.balanceUsd),
-      supplyPercent: decimal(holder.supplyPercent),
+      supplyPercent: decimal(holder.supplyPercent ?? 0),
       holderRank: holder.holderRank,
       snapshotAt: new Date(snapshotAt),
       sourceEndpoint: holder.sourceEndpoint,
@@ -642,9 +642,9 @@ export async function saveTokenSnapshot(tokenId: string, runId: string, snapshot
     tokenId,
     priceUsd: decimal(snapshot.priceUsd),
     priceChange24h: decimal(snapshot.priceChange24h),
-    holderCount: snapshot.holderCount,
-    top10SupplyPercent: decimal(snapshot.top10SupplyPercent),
-    top50SupplyPercent: decimal(snapshot.top50SupplyPercent),
+    holderCount: snapshot.holderCount ?? snapshot.trackedHolderCount ?? 0,
+    top10SupplyPercent: decimal(snapshot.top10SupplyPercent ?? 0),
+    top50SupplyPercent: decimal(snapshot.top50SupplyPercent ?? 0),
     concentrationScore: snapshot.concentrationScore,
     holderHealthScore: snapshot.holderHealthScore,
     whaleConfidenceScore: snapshot.whaleConfidenceScore,
@@ -759,8 +759,8 @@ export async function saveSnapshotDataset(dataset: TokenDataset) {
 
   const batch: Array<{ sql: string; params?: Array<string | number | boolean | null> }> = [
     {
-      sql: `UPDATE tokens SET symbol = ?, name = ?, security_status = ?, updated_at = ? WHERE id = ?`,
-      params: [token.symbol, token.name, token.securityStatus, latestSnapshot.snapshotAt, token.id]
+      sql: `UPDATE tokens SET symbol = ?, name = ?, decimals = ?, security_status = ?, updated_at = ? WHERE id = ?`,
+      params: [token.symbol, token.name, token.decimals, token.securityStatus, latestSnapshot.snapshotAt, token.id]
     },
     {
       sql: `INSERT INTO pipeline_runs (id, token_id, status, mode, api_calls_used, endpoints_used_json, holders_scanned, wallets_enriched, cache_hits, cache_misses, duration_ms, rate_limit_budget_used, started_at, completed_at, error_message)
@@ -791,9 +791,9 @@ export async function saveSnapshotDataset(dataset: TokenDataset) {
         token.id,
         latestSnapshot.priceUsd,
         latestSnapshot.priceChange24h,
-        latestSnapshot.holderCount,
-        latestSnapshot.top10SupplyPercent,
-        latestSnapshot.top50SupplyPercent,
+        latestSnapshot.holderCount ?? latestSnapshot.trackedHolderCount ?? 0,
+        latestSnapshot.top10SupplyPercent ?? 0,
+        latestSnapshot.top50SupplyPercent ?? 0,
         latestSnapshot.concentrationScore,
         latestSnapshot.holderHealthScore,
         latestSnapshot.whaleConfidenceScore,
@@ -819,7 +819,7 @@ export async function saveSnapshotDataset(dataset: TokenDataset) {
         holder.walletAddress,
         holder.balance,
         holder.balanceUsd,
-        holder.supplyPercent,
+        holder.supplyPercent ?? 0,
         holder.holderRank,
         latestSnapshot.snapshotAt,
         holder.sourceEndpoint,
@@ -988,7 +988,8 @@ function mapPgSnapshot(row: PgSnapshotRow): TokenSnapshot {
     snapshotAt: toIso(row.snapshotAt),
     priceUsd: Number(row.priceUsd ?? 0),
     priceChange24h: Number(row.priceChange24h ?? 0),
-    holderCount: row.holderCount ?? 0,
+    holderCount: row.holderCount ?? undefined,
+    trackedHolderCount: row.holderCount ?? undefined,
     top10SupplyPercent: Number(row.top10SupplyPercent ?? 0),
     top50SupplyPercent: Number(row.top50SupplyPercent ?? 0),
     concentrationScore: row.concentrationScore ?? 0,
@@ -1088,7 +1089,8 @@ function mapSnapshot(row: SnapshotRow): TokenSnapshot {
     snapshotAt: row.snapshot_at,
     priceUsd: Number(row.price_usd),
     priceChange24h: Number(row.price_change_24h),
-    holderCount: Number(row.holder_count),
+    holderCount: Number(row.holder_count) || undefined,
+    trackedHolderCount: Number(row.holder_count) || undefined,
     top10SupplyPercent: Number(row.top10_supply_percent),
     top50SupplyPercent: Number(row.top50_supply_percent),
     concentrationScore: Number(row.concentration_score),
@@ -1222,6 +1224,10 @@ function toIso(value: Date | string) {
 
 function decimal(value: number | null | undefined) {
   return String(value ?? 0);
+}
+
+function shortTokenSymbol(address: string) {
+  return address.length > 10 ? `${address.slice(0, 4)}...${address.slice(-4)}` : address;
 }
 
 export class RepositoryError extends Error {

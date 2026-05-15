@@ -13,7 +13,7 @@ import { BirdeyePipelineCard } from "@/components/pipeline-card";
 import { ScoreBreakdown } from "@/components/score-breakdown";
 import { RiskBadge } from "@/components/ui/badges";
 import { TokenAddress } from "@/components/ui/address";
-import { formatPercent, relativeTimeLabel } from "@/lib/utils/format";
+import { formatOptionalPercent, formatPercent, relativeTimeLabel } from "@/lib/utils/format";
 import { cn } from "@/lib/utils/cn";
 
 type Tab = "overview" | "holders" | "alerts" | "campaigns" | "pipeline" | "settings";
@@ -105,7 +105,7 @@ export function TokenDetailClient({ initialDataset }: { initialDataset: TokenDat
         <MetricCard label="Holder Health" value={latest.holderHealthScore} detail="Retention-weighted score with source-backed breakdown." icon={Users} tone="good" />
         <MetricCard label="Holder Churn" value={formatPercent(latest.churnRate)} detail={`${latest.likelyExited} likely exited or dropped below threshold.`} icon={AlertTriangle} tone="warn" />
         <MetricCard label="Whale Confidence" value={latest.whaleConfidenceScore} detail="Whale accumulation minus whale reduction pressure." icon={BarChart3} tone={latest.whaleConfidenceScore >= 60 ? "good" : "bad"} />
-        <MetricCard label="Distribution Risk" value={latest.distributionRiskScore} detail={`Top 10 supply: ${formatPercent(latest.top10SupplyPercent)}`} icon={Database} tone={latest.distributionRiskScore > 65 ? "bad" : "warn"} />
+        <MetricCard label="Distribution Risk" value={latest.distributionRiskScore} detail={`Top 10 supply: ${formatOptionalPercent(latest.top10SupplyPercent)}`} icon={Database} tone={latest.distributionRiskScore > 65 ? "bad" : "warn"} />
       </div>
 
       <div className="mt-6 flex gap-2 overflow-x-auto border-b border-white/10">

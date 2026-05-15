@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     latestPipelineRun: dataset.pipelineRun,
     dataset,
     dataAvailability: {
-      hasSnapshots: dataset.snapshots.some((snapshot) => snapshot.holderCount > 0),
+      hasSnapshots: dataset.snapshots.some((snapshot) => (snapshot.holderCount ?? snapshot.trackedHolderCount ?? 0) > 0),
       hasHolderSegments: dataset.segments.length > 0,
       hasAlerts: dataset.alerts.length > 0,
       hasPipelineRun: !dataset.pipelineRun.id.startsWith("empty-")

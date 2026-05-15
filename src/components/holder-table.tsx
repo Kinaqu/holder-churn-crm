@@ -1,7 +1,7 @@
 import type { HolderSegment } from "@/lib/types";
 import { SegmentBadge, SourceBadge } from "@/components/ui/badges";
 import { WalletAddress } from "@/components/ui/address";
-import { formatPercent } from "@/lib/utils/format";
+import { formatOptionalPercent, formatPercent } from "@/lib/utils/format";
 
 export function HolderChangeTable({ segments }: { segments: HolderSegment[] }) {
   if (segments.length === 0) {
@@ -35,7 +35,7 @@ export function HolderChangeTable({ segments }: { segments: HolderSegment[] }) {
                 {formatPercent(segment.changePercent)}
               </td>
               <td className="px-4 py-3 text-slate-300">#{segment.currentRank ?? segment.previousRank ?? "-"}</td>
-              <td className="px-4 py-3 text-slate-300">{formatPercent(segment.currentSupplyPercent ?? segment.previousSupplyPercent ?? 0)}</td>
+              <td className="px-4 py-3 text-slate-300">{formatOptionalPercent(segment.currentSupplyPercent ?? segment.previousSupplyPercent)}</td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   {segment.sourceEndpoints.map((source) => <SourceBadge key={source} source={source} />)}

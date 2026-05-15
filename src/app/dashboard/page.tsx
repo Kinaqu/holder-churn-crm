@@ -7,7 +7,7 @@ import { MetricCard } from "@/components/metric-card";
 import { NextBestActionPanel } from "@/components/next-best-action-panel";
 import { BirdeyePipelineCard } from "@/components/pipeline-card";
 import { getDemoDataset } from "@/lib/demo/demo-data";
-import { formatPercent } from "@/lib/utils/format";
+import { formatOptionalPercent, formatPercent } from "@/lib/utils/format";
 
 export default function DashboardPage() {
   const dataset = getDemoDataset();
@@ -31,7 +31,7 @@ export default function DashboardPage() {
         <MetricCard label="Holder Churn Rate" value={formatPercent(latest.churnRate)} detail={`${latest.likelyExited} likely exited.`} icon={AlertTriangle} tone="warn" />
         <MetricCard label="Whale Confidence" value={latest.whaleConfidenceScore} detail="Whales reducing faster than accumulating." icon={WalletCards} tone="bad" />
         <MetricCard label="API Calls Used" value={`${dataset.pipelineRun.apiCallsUsed}/50`} detail="Safe Birdeye budget stayed intact." icon={Database} tone="good" />
-        <MetricCard label="Distribution Risk" value={latest.distributionRiskScore} detail={`Top 10: ${formatPercent(latest.top10SupplyPercent)}`} icon={BarChart3} tone="warn" />
+        <MetricCard label="Distribution Risk" value={latest.distributionRiskScore} detail={`Top 10: ${formatOptionalPercent(latest.top10SupplyPercent)}`} icon={BarChart3} tone="warn" />
         <MetricCard label="New Holders" value={latest.newHolders} detail="Campaign-attributed demo cohort." icon={Users} tone="good" />
         <MetricCard label="Likely Exited" value={latest.likelyExited} detail="Thresholded top-holder interpretation." icon={AlertTriangle} tone="bad" />
         <MetricCard label="Last Snapshot" value="24m" detail="Fresh demo run." icon={Clock} tone="neutral" />

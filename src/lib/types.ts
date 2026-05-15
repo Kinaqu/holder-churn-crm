@@ -19,6 +19,8 @@ export type BirdeyeSource =
   | "Token Holder"
   | "Holder Distribution"
   | "Price Stats"
+  | "Token Overview"
+  | "Token Metadata"
   | "Token Security"
   | "Token Transfer"
   | "Wallet Current Net Worth"
@@ -31,9 +33,11 @@ export type HolderSnapshot = {
   id?: string;
   sourceRunId?: string;
   walletAddress: string;
+  tokenAccountAddress?: string;
+  addressType?: "wallet" | "token_account" | "unknown";
   balance: number;
   balanceUsd: number;
-  supplyPercent: number;
+  supplyPercent?: number;
   holderRank: number;
   snapshotAt: string;
   sourceEndpoint: BirdeyeSource;
@@ -106,9 +110,10 @@ export type TokenSnapshot = {
   snapshotAt: string;
   priceUsd: number;
   priceChange24h: number;
-  holderCount: number;
-  top10SupplyPercent: number;
-  top50SupplyPercent: number;
+  holderCount?: number;
+  trackedHolderCount?: number;
+  top10SupplyPercent?: number;
+  top50SupplyPercent?: number;
   concentrationScore: number;
   holderHealthScore: number;
   whaleConfidenceScore: number;

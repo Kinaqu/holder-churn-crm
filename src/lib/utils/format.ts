@@ -2,6 +2,14 @@ export function formatPercent(value: number, digits = 1) {
   return `${value.toFixed(digits)}%`;
 }
 
+export function formatOptionalPercent(value: number | null | undefined, digits = 1) {
+  return typeof value === "number" && Number.isFinite(value) ? formatPercent(value, digits) : "N/A";
+}
+
+export function formatOptionalNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "N/A";
+}
+
 export function formatUsd(value: number) {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;

@@ -17,7 +17,9 @@ export function generateAlerts(segments: HolderSegment[], current: TokenSnapshot
         `Wallet ranked #${whale.currentRank ?? whale.previousRank} in the latest Birdeye holder snapshot.`,
         `Balance decreased by ${Math.abs(whale.changePercent).toFixed(1)}%.`,
         "Transfer context is attached when Birdeye Token Transfer is available.",
-        previous ? `Top 10 concentration moved from ${previous.top10SupplyPercent.toFixed(1)}% to ${current.top10SupplyPercent.toFixed(1)}%.` : "Distribution trend needs a prior snapshot."
+        previous && previous.top10SupplyPercent !== undefined && current.top10SupplyPercent !== undefined
+          ? `Top 10 concentration moved from ${previous.top10SupplyPercent.toFixed(1)}% to ${current.top10SupplyPercent.toFixed(1)}%.`
+          : "Distribution trend needs a prior snapshot and concentration source."
       ],
       sourceEndpoints: ["Token Holder", "Token Transfer", "Holder Distribution"],
       confidence: 88,
@@ -47,13 +49,13 @@ export function generateAlerts(segments: HolderSegment[], current: TokenSnapshot
     });
   }
 
-  if (current.distributionRiskScore >= 70 || current.top10SupplyPercent >= 50) {
+  if (current.distributionRiskScore >= 70 || (current.top10SupplyPercent ?? 0) >= 50) {
     alerts.push({
       id: "alert-distribution-risk",
       type: "CONCENTRATION_RISK",
       severity: "high",
       title: "Distribution risk is high",
-      message: `Top 10 holders control ${current.top10SupplyPercent.toFixed(1)}% of the tracked supply.`,
+      message: current.top10SupplyPercent === undefined ? "Top holder concentration source is unavailable." : `Top 10 holders control ${current.top10SupplyPercent.toFixed(1)}% of the tracked supply.`,
       reason: [
         "Holder Distribution indicates elevated top-holder concentration.",
         "High concentration can make community confidence more fragile.",

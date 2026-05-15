@@ -4,6 +4,8 @@ export type BirdeyeEndpointName =
   | "tokenHolders"
   | "holderDistribution"
   | "priceStats"
+  | "tokenOverview"
+  | "tokenMetadata"
   | "tokenSecurity"
   | "tokenTransfers"
   | "walletCurrentNetWorth"
@@ -54,6 +56,25 @@ export const BIRDEYE_ENDPOINTS: Record<BirdeyeEndpointName, EndpointDefinition> 
     ttlSeconds: 60 * 3,
     requiredForSnapshot: false,
     walletRateLimit: false
+  },
+  tokenOverview: {
+    name: "tokenOverview",
+    label: "Token Overview",
+    method: "GET",
+    path: "/defi/token_overview",
+    ttlSeconds: 60 * 5,
+    requiredForSnapshot: false,
+    walletRateLimit: false
+  },
+  tokenMetadata: {
+    name: "tokenMetadata",
+    label: "Token Metadata",
+    method: "GET",
+    path: "/defi/v3/token/meta-data/single",
+    ttlSeconds: 60 * 60 * 24,
+    requiredForSnapshot: false,
+    walletRateLimit: false,
+    unavailableOnPackages: ["standard"]
   },
   tokenSecurity: {
     name: "tokenSecurity",

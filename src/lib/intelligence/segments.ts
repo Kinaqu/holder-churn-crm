@@ -31,8 +31,8 @@ export function classifyHolderSegments(previous: HolderSnapshot[], current: Hold
     const isWhale =
       currentHolder.holderRank <= WHALE_RANK_THRESHOLD ||
       previousHolder.holderRank <= WHALE_RANK_THRESHOLD ||
-      currentHolder.supplyPercent >= WHALE_SUPPLY_THRESHOLD ||
-      previousHolder.supplyPercent >= WHALE_SUPPLY_THRESHOLD;
+      (currentHolder.supplyPercent ?? 0) >= WHALE_SUPPLY_THRESHOLD ||
+      (previousHolder.supplyPercent ?? 0) >= WHALE_SUPPLY_THRESHOLD;
 
     if (isWhale && changePercent <= -10) {
       segments.push(segment("WHALE_REDUCED", previousHolder, currentHolder, changePercent, [

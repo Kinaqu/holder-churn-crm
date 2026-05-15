@@ -132,7 +132,7 @@ To verify the Solana-only holder endpoints with the exact runtime key, run:
 npm run birdeye:check -- --address <SOLANA_TOKEN_MINT>
 ```
 
-The diagnostic checks Token Holder as a baseline, then Holder Distribution and Token Transfer. It prints status codes, response previews, and rate-limit/auth headers without printing the API key.
+The diagnostic checks Token Holder as a baseline, Token Overview/Metadata for token identity, then Holder Distribution and Token Transfer. It prints status codes, response previews, schema keys, candidate identity/count/supply/holder fields, and rate-limit/auth headers without printing the API key.
 
 If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly states data is not persisted. If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can be read from the database but live snapshots return `BIRDEYE_API_KEY_MISSING`.
 
