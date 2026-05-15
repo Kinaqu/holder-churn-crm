@@ -67,19 +67,19 @@ Optional sources:
 
 - Holder Distribution
 - Price Stats
-- Token Security
-- Token Transfer
+- Token Security (skipped on Birdeye Standard)
+- Token Transfer (Solana-only)
 - Wallet enrichment for only 5-10 priority wallets
 
-Optional sources can fail without failing the snapshot. The Pipeline panel marks missing sources and the dashboard continues with partial data.
+Optional sources can fail without failing the snapshot. The Pipeline panel marks unavailable package/chain sources as skipped, marks temporary upstream failures as missing, and the dashboard continues with partial data.
 
 MVP per-snapshot budget:
 
 - Token Holder: 1-3 calls
 - Holder Distribution: 1 call
 - Price Stats: 1 call
-- Token Security: 1 call
-- Token Transfers: 1-2 calls
+- Token Security: 0 calls on Standard; 1 call only on enabled higher packages
+- Token Transfers: 1-2 calls when the chain and package allow it
 - Wallet Enrichment: max 5-10 selected wallets
 
 ## Methodology
@@ -106,6 +106,7 @@ Scores are transparent heuristics, not fake ML:
 ```env
 BIRDEYE_API_KEY=
 BIRDEYE_PACKAGE=standard
+BIRDEYE_TOKEN_SECURITY_ENABLED=
 DATABASE_URL=
 CRON_SECRET=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -123,7 +124,15 @@ BIRDEYE_WALLET_RPM=30
 
 `BIRDEYE_ACCOUNT_RPS` defaults to `1` to stay compatible with Birdeye Standard package rate limits. Raise it only when the Birdeye package allows higher account-level throughput.
 
-`BIRDEYE_PACKAGE` defaults to `standard`. Token Security is called only for `lite`, `starter`, `premium`, `business`, or `enterprise`; on `standard` it is shown as a planned skipped source and does not make the snapshot partial.
+`BIRDEYE_PACKAGE` defaults to `standard`. Token Security is never called on `standard`; it is shown as a planned skipped source and does not make the snapshot partial. On higher packages, Token Security still requires `BIRDEYE_TOKEN_SECURITY_ENABLED=true` so an accidentally overstated package env does not trigger unsupported calls. Optional sources that return `401` or `403` are cached as unavailable for the current key/package for several hours so later snapshots do not repeat known-inaccessible calls.
+
+To verify the Solana-only holder endpoints with the exact runtime key, run:
+
+```bash
+npm run birdeye:check -- --address <SOLANA_TOKEN_MINT>
+```
+
+The diagnostic checks Token Holder as a baseline, then Holder Distribution and Token Transfer. It prints status codes, response previews, and rate-limit/auth headers without printing the API key.
 
 If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly states data is not persisted. If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can be read from the database but live snapshots return `BIRDEYE_API_KEY_MISSING`.
 
@@ -192,6 +201,7 @@ UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 DEMO_MODE=
 BIRDEYE_PACKAGE=
+BIRDEYE_TOKEN_SECURITY_ENABLED=
 BIRDEYE_ACCOUNT_RPS=
 BIRDEYE_ACCOUNT_RPM=
 BIRDEYE_WALLET_RPS=

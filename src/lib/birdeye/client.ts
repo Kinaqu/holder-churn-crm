@@ -1,6 +1,7 @@
 import "server-only";
 
 import { BIRDEYE_ENDPOINTS, assertAllowedEndpoint, type BirdeyeEndpointName } from "@/lib/birdeye/endpoints";
+import type { BirdeyeSource } from "@/lib/types";
 import {
   normalizeDistribution,
   normalizePriceStats,
@@ -19,8 +20,9 @@ export type BirdeyeResult<T> =
       statusCode: number;
       cacheHit: boolean;
       durationMs: number;
+      calls: number;
       endpoint: BirdeyeEndpointName;
-      sourceLabel: string;
+      sourceLabel: BirdeyeSource;
     }
   | {
       ok: false;
@@ -28,8 +30,10 @@ export type BirdeyeResult<T> =
       statusCode?: number;
       cacheHit: boolean;
       durationMs: number;
+      calls: number;
+      retryAfterMs?: number;
       endpoint: BirdeyeEndpointName;
-      sourceLabel: string;
+      sourceLabel: BirdeyeSource;
     };
 
 type Usage = {
@@ -113,7 +117,7 @@ class BirdeyeClient {
       chain,
       body: {
         token_address: tokenAddress,
-        limit: Math.min(options.limit ?? 50, 50),
+        limit: Math.min(options.limit ?? defaultTransferLimit(), defaultTransferLimit()),
         time_from: options.timeFrom,
         time_to: options.timeTo
       }
@@ -193,7 +197,8 @@ class BirdeyeClient {
       return failure(name, "BIRDEYE_API_KEY is not configured.", Date.now() - startedAt);
     }
 
-    const cacheKey = `${name}:${options.chain}:${stableStringify(query)}:${stableStringify(body)}`;
+    const chain = normalizeChain(options.chain);
+    const cacheKey = `${name}:${chain}:${stableStringify(query)}:${stableStringify(body)}`;
     const cached = memoryCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       this.usage.cacheHits += 1;
@@ -203,61 +208,88 @@ class BirdeyeClient {
         statusCode: 200,
         cacheHit: true,
         durationMs: Date.now() - startedAt,
+        calls: 0,
         endpoint: name,
         sourceLabel: endpoint.label
       };
     }
 
     this.usage.cacheMisses += 1;
-    const rateLimit = await reserveRequestBudget(endpoint.walletRateLimit ? "wallet" : "account");
-    if (!rateLimit.ok) {
-      return failure(name, rateLimit.error, Date.now() - startedAt);
-    }
-
-    this.usage.calls += 1;
     const url = new URL(endpoint.path, this.baseUrl);
     for (const [key, value] of Object.entries(query)) {
       url.searchParams.set(key, value);
     }
 
+    let calls = 0;
+    const maxAttempts = 3;
     try {
-      const response = await fetch(url, {
-        method: endpoint.method,
-        headers: {
-          "X-API-KEY": this.apiKey,
-          "x-chain": options.chain,
-          accept: "application/json",
-          ...(endpoint.method === "POST" ? { "content-type": "application/json" } : {})
-        },
-        body: endpoint.method === "POST" ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(9_000),
-        cache: "no-store"
-      });
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const rateLimit = await reserveRequestBudget(endpoint.walletRateLimit ? "wallet" : "account");
+        if (!rateLimit.ok) {
+          return failure(name, rateLimit.error, Date.now() - startedAt, undefined, calls);
+        }
 
-      const durationMs = Date.now() - startedAt;
+        calls += 1;
+        this.usage.calls += 1;
+        const response = await fetch(url, {
+          method: endpoint.method,
+          headers: {
+            "X-API-KEY": this.apiKey,
+            "x-chain": chain,
+            accept: "application/json",
+            ...(endpoint.method === "POST" ? { "content-type": "application/json" } : {})
+          },
+          body: endpoint.method === "POST" ? JSON.stringify(body) : undefined,
+          signal: AbortSignal.timeout(9_000),
+          cache: "no-store"
+        });
 
-      if (!response.ok) {
-        return failure(name, `Birdeye ${BIRDEYE_ENDPOINTS[name].label} returned ${response.status}.${statusHint(response.status)}`, durationMs, response.status);
+        const durationMs = Date.now() - startedAt;
+
+        if (!response.ok) {
+          const responseBody = sanitizeError(await response.text());
+          const retryAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
+          logBirdeyeFailure({
+            name,
+            path: endpoint.path,
+            status: response.status,
+            attempt,
+            maxAttempts,
+            durationMs,
+            headers: diagnosticHeaders(response.headers),
+            body: responseBody
+          });
+
+          if (response.status === 429 && attempt < maxAttempts) {
+            await sleep(retryAfterMs ?? retryDelayMs(name, attempt));
+            continue;
+          }
+
+          return failure(name, `Birdeye ${BIRDEYE_ENDPOINTS[name].label} returned ${response.status}.${statusHint(response.status)}`, durationMs, response.status, calls, retryAfterMs);
+        }
+
+        const data = (await response.json()) as T;
+        memoryCache.set(cacheKey, { data, expiresAt: Date.now() + endpoint.ttlSeconds * 1000 });
+        return {
+          ok: true,
+          data,
+          statusCode: response.status,
+          cacheHit: false,
+          durationMs,
+          calls,
+          endpoint: name,
+          sourceLabel: endpoint.label
+        };
       }
-
-      const data = (await response.json()) as T;
-      memoryCache.set(cacheKey, { data, expiresAt: Date.now() + endpoint.ttlSeconds * 1000 });
-      return {
-        ok: true,
-        data,
-        statusCode: response.status,
-        cacheHit: false,
-        durationMs,
-        endpoint: name,
-        sourceLabel: endpoint.label
-      };
     } catch (error) {
-      return failure(name, error instanceof Error ? sanitizeError(error.message) : "Birdeye request failed.", Date.now() - startedAt);
+      return failure(name, error instanceof Error ? sanitizeError(error.message) : "Birdeye request failed.", Date.now() - startedAt, undefined, calls);
     }
+
+    return failure(name, "Birdeye request failed after retries.", Date.now() - startedAt, undefined, calls);
   }
 }
 
-function failure(name: BirdeyeEndpointName, error: string, durationMs: number, statusCode?: number): BirdeyeResult<never> {
+function failure(name: BirdeyeEndpointName, error: string, durationMs: number, statusCode?: number, calls = 0, retryAfterMs?: number): BirdeyeResult<never> {
   return {
     ok: false,
     endpoint: name,
@@ -265,7 +297,9 @@ function failure(name: BirdeyeEndpointName, error: string, durationMs: number, s
     statusCode,
     error,
     cacheHit: false,
-    durationMs
+    durationMs,
+    calls,
+    retryAfterMs
   };
 }
 
@@ -348,8 +382,63 @@ function envInt(name: string, fallback: number) {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+function defaultTransferLimit() {
+  return birdeyePackageLabel() === "standard" ? 10 : 50;
+}
+
+function birdeyePackageLabel() {
+  return String(process.env.BIRDEYE_PACKAGE ?? "standard").trim().toLowerCase();
+}
+
+function normalizeChain(chain: string) {
+  return chain.trim().toLowerCase();
+}
+
+function retryDelayMs(name: BirdeyeEndpointName, attempt: number) {
+  if (name === "tokenTransfers") return attempt * 10_000;
+  if (name === "holderDistribution") return attempt * 5_000;
+  return attempt * 1_500;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.min(Math.max(seconds * 1_000, 0), 10_000);
+
+  const resetAt = Date.parse(value);
+  if (Number.isNaN(resetAt)) return undefined;
+  return Math.min(Math.max(resetAt - Date.now(), 0), 10_000);
+}
+
+function diagnosticHeaders(headers: Headers) {
+  const interestingHeaders = ["retry-after", "x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "cf-ray"];
+  return Object.fromEntries(interestingHeaders.map((header) => [header, headers.get(header)]).filter(([, value]) => value));
+}
+
+function logBirdeyeFailure(input: {
+  name: BirdeyeEndpointName;
+  path: string;
+  status: number;
+  attempt: number;
+  maxAttempts: number;
+  durationMs: number;
+  headers: Record<string, string>;
+  body: string;
+}) {
+  console.warn("Birdeye request failed", {
+    endpoint: input.name,
+    path: input.path,
+    status: input.status,
+    attempt: input.attempt,
+    maxAttempts: input.maxAttempts,
+    durationMs: input.durationMs,
+    headers: input.headers,
+    body: input.body.slice(0, 500)
+  });
 }
 
 function statusHint(status: number) {
