@@ -237,7 +237,7 @@ class BirdeyeClient {
       const durationMs = Date.now() - startedAt;
 
       if (!response.ok) {
-        return failure(name, `Birdeye ${BIRDEYE_ENDPOINTS[name].label} returned ${response.status}.`, durationMs, response.status);
+        return failure(name, `Birdeye ${BIRDEYE_ENDPOINTS[name].label} returned ${response.status}.${statusHint(response.status)}`, durationMs, response.status);
       }
 
       const data = (await response.json()) as T;
@@ -286,19 +286,38 @@ function validateParams(params: Record<string, string>) {
 }
 
 async function reserveRequestBudget(bucketName: "account" | "wallet") {
-  const limit = bucketName === "wallet" ? 30 : 50;
+  const rpmLimit = bucketName === "wallet" ? envInt("BIRDEYE_WALLET_RPM", 30) : envInt("BIRDEYE_ACCOUNT_RPM", 50);
+  const rpsLimit = bucketName === "wallet" ? envInt("BIRDEYE_WALLET_RPS", 5) : envInt("BIRDEYE_ACCOUNT_RPS", 1);
+
+  await reserveLocalWindowBudget(`${bucketName}:rps`, rpsLimit, 1_000);
 
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-    return reserveUpstashBudget(bucketName, limit);
+    return reserveUpstashBudget(bucketName, rpmLimit);
   }
 
-  const now = Date.now();
-  const key = bucketName;
-  const bucket = (requestBuckets.get(key) ?? []).filter((timestamp) => now - timestamp < 60_000);
-  if (bucket.length >= limit) return { ok: false as const, error: `Safe Birdeye ${bucketName} rate limit reached: ${limit} requests/minute.` };
-  bucket.push(now);
-  requestBuckets.set(key, bucket);
+  const reserved = await reserveLocalWindowBudget(`${bucketName}:rpm`, rpmLimit, 60_000, false);
+  if (!reserved) return { ok: false as const, error: `Safe Birdeye ${bucketName} rate limit reached: ${rpmLimit} requests/minute.` };
   return { ok: true as const };
+}
+
+async function reserveLocalWindowBudget(key: string, limit: number, windowMs: number, wait = true): Promise<boolean> {
+  while (true) {
+    const now = Date.now();
+    const bucket = (requestBuckets.get(key) ?? []).filter((timestamp) => now - timestamp < windowMs);
+    if (bucket.length < limit) {
+      bucket.push(now);
+      requestBuckets.set(key, bucket);
+      return true;
+    }
+
+    if (!wait) {
+      requestBuckets.set(key, bucket);
+      return false;
+    }
+
+    const delayMs = Math.max(1, windowMs - (now - bucket[0]));
+    await sleep(delayMs);
+  }
 }
 
 async function reserveUpstashBudget(bucketName: "account" | "wallet", limit: number) {
@@ -322,6 +341,22 @@ async function reserveUpstashBudget(bucketName: "account" | "wallet", limit: num
 
 function stableStringify(value: Record<string, string>) {
   return JSON.stringify(Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))));
+}
+
+function envInt(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function statusHint(status: number) {
+  if (status === 401) return " Check the API key and whether this key is authorized for the endpoint.";
+  if (status === 403) return " The request is forbidden or this endpoint is not enabled for the key/package.";
+  if (status === 429) return " Birdeye account rate limit reached; lower BIRDEYE_ACCOUNT_RPS/RPM or retry later.";
+  return "";
 }
 
 function sanitizeError(message: string) {
