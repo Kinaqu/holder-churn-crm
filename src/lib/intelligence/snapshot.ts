@@ -73,7 +73,7 @@ export async function runManualSnapshot(input: {
   const [distribution, price, security, transfers] = await Promise.all([
     client.getHolderDistribution(chain, address),
     client.getPriceStats(chain, address),
-    client.getTokenSecurity(chain, address),
+    isTokenSecurityAvailable() ? client.getTokenSecurity(chain, address) : Promise.resolve(null),
     client.getTokenTransfers(chain, address, { limit: 50 })
   ]);
 
@@ -91,9 +91,24 @@ export async function runManualSnapshot(input: {
     segments
   });
 
+  const expectedOptionalResults = [distribution, price, transfers, ...(security ? [security] : [])];
+  const tokenSecuritySource = security
+    ? {
+        source: "Token Security" as const,
+        status: security.ok ? ("complete" as const) : ("missing" as const),
+        detail: security.ok ? "risk context added" : security.error,
+        calls: security.cacheHit ? 0 : 1
+      }
+    : {
+        source: "Token Security" as const,
+        status: "skipped" as const,
+        detail: `not available on Birdeye ${birdeyePackageLabel()} package`,
+        calls: 0
+      };
+
   const pipelineRun: PipelineRun = {
     id: input.runId ?? `run-${Date.now()}`,
-    status: [distribution, price, security, transfers].some((result) => !result.ok) ? "partial" : "complete",
+    status: expectedOptionalResults.some((result) => !result.ok) ? "partial" : "complete",
     mode: "live",
     apiCallsUsed: client.usage.calls,
     apiSafeBudget: 50,
@@ -108,14 +123,14 @@ export async function runManualSnapshot(input: {
     completedAt: new Date().toISOString(),
     sources: [
       { source: "Token Holder", status: "complete", detail: previousHolders.length ? `${holders.length} holders scanned` : `${holders.length} holders scanned; baseline snapshot`, calls: holdersResult.cacheHit ? 0 : 1 },
-      { source: "Holder Distribution", status: distribution.ok ? "complete" : "missing", detail: distribution.ok ? "concentration calculated" : distribution.error, calls: 1 },
-      { source: "Price Stats", status: price.ok ? "complete" : "missing", detail: price.ok ? "market context added" : price.error, calls: 1 },
-      { source: "Token Security", status: security.ok ? "complete" : "missing", detail: security.ok ? "risk context added" : security.error, calls: 1 },
-      { source: "Token Transfer", status: transfers.ok ? "complete" : "missing", detail: transfers.ok ? "transfer context added" : transfers.error, calls: 1 },
+      { source: "Holder Distribution", status: distribution.ok ? "complete" : "missing", detail: distribution.ok ? "concentration calculated" : distribution.error, calls: distribution.cacheHit ? 0 : 1 },
+      { source: "Price Stats", status: price.ok ? "complete" : "missing", detail: price.ok ? "market context added" : price.error, calls: price.cacheHit ? 0 : 1 },
+      tokenSecuritySource,
+      { source: "Token Transfer", status: transfers.ok ? "complete" : "missing", detail: transfers.ok ? "transfer context added" : transfers.error, calls: transfers.cacheHit ? 0 : 1 },
       { source: "Wallet Current Net Worth", status: "skipped", detail: "wallet enrichment deferred unless a high-priority wallet needs it", calls: 0 }
     ]
   };
-  const apiCallLogs = toApiCallLogs([holdersResult, distribution, price, security, transfers], pipelineRun.id, input.tokenId);
+  const apiCallLogs = toApiCallLogs([holdersResult, distribution, price, transfers, ...(security ? [security] : [])], pipelineRun.id, input.tokenId);
 
   return {
     token: {
@@ -125,7 +140,7 @@ export async function runManualSnapshot(input: {
       symbol: input.token?.symbol ?? "LIVE",
       name: input.token?.name ?? "Live Birdeye Token",
       decimals: input.token?.decimals ?? 6,
-      securityStatus: security.ok ? "clear" : "unknown",
+      securityStatus: security?.ok ? "clear" : "unknown",
       lastSnapshotAt: currentSnapshot.snapshotAt,
       createdAt: input.token?.createdAt,
       updatedAt: currentSnapshot.snapshotAt
@@ -157,6 +172,14 @@ function toApiCallLogs(results: Array<{ sourceLabel: string; statusCode?: number
 
 export function isDemoMode() {
   return process.env.DEMO_MODE === "true";
+}
+
+function isTokenSecurityAvailable() {
+  return new Set(["lite", "starter", "premium", "business", "enterprise"]).has(birdeyePackageLabel());
+}
+
+function birdeyePackageLabel() {
+  return String(process.env.BIRDEYE_PACKAGE ?? "standard").trim().toLowerCase();
 }
 
 function createBaselineSegments(holders: HolderSnapshot[]): HolderSegment[] {

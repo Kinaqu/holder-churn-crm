@@ -1,5 +1,18 @@
 export default function SettingsPage() {
-  const envs = ["BIRDEYE_API_KEY", "DATABASE_URL", "CRON_SECRET", "NEXT_PUBLIC_APP_URL", "DEMO_MODE", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"];
+  const envs = [
+    "BIRDEYE_API_KEY",
+    "BIRDEYE_PACKAGE",
+    "DATABASE_URL",
+    "CRON_SECRET",
+    "NEXT_PUBLIC_APP_URL",
+    "DEMO_MODE",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "BIRDEYE_ACCOUNT_RPS",
+    "BIRDEYE_ACCOUNT_RPM",
+    "BIRDEYE_WALLET_RPS",
+    "BIRDEYE_WALLET_RPM"
+  ];
   return (
     <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
       <section className="panel rounded-lg p-6">

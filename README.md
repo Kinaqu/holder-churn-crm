@@ -105,6 +105,7 @@ Scores are transparent heuristics, not fake ML:
 
 ```env
 BIRDEYE_API_KEY=
+BIRDEYE_PACKAGE=standard
 DATABASE_URL=
 CRON_SECRET=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -112,9 +113,17 @@ DEMO_MODE=true
 
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
+BIRDEYE_ACCOUNT_RPS=1
+BIRDEYE_ACCOUNT_RPM=50
+BIRDEYE_WALLET_RPS=5
+BIRDEYE_WALLET_RPM=30
 ```
 
 `BIRDEYE_API_KEY` is server-only. All Birdeye calls go through `src/lib/birdeye/client.ts`.
+
+`BIRDEYE_ACCOUNT_RPS` defaults to `1` to stay compatible with Birdeye Standard package rate limits. Raise it only when the Birdeye package allows higher account-level throughput.
+
+`BIRDEYE_PACKAGE` defaults to `standard`. Token Security is called only for `lite`, `starter`, `premium`, `business`, or `enterprise`; on `standard` it is shown as a planned skipped source and does not make the snapshot partial.
 
 If `DATABASE_URL` is missing, the app runs deterministic demo mode and clearly states data is not persisted. If `DATABASE_URL` exists but `BIRDEYE_API_KEY` is missing, live tokens can be read from the database but live snapshots return `BIRDEYE_API_KEY_MISSING`.
 
@@ -182,6 +191,11 @@ Optional environment variables:
 UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 DEMO_MODE=
+BIRDEYE_PACKAGE=
+BIRDEYE_ACCOUNT_RPS=
+BIRDEYE_ACCOUNT_RPM=
+BIRDEYE_WALLET_RPS=
+BIRDEYE_WALLET_RPM=
 ```
 
 Live deployment checklist:
