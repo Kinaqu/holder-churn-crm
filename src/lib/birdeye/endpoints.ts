@@ -12,6 +12,8 @@ export type BirdeyeEndpointName =
   | "holderProfile"
   | "holderPositions";
 
+export type BirdeyePackage = "standard" | "lite" | "starter" | "premium" | "business" | "enterprise";
+
 export type EndpointDefinition = {
   name: BirdeyeEndpointName;
   label: BirdeyeSource;
@@ -20,6 +22,8 @@ export type EndpointDefinition = {
   ttlSeconds: number;
   requiredForSnapshot: boolean;
   walletRateLimit: boolean;
+  supportedChains?: readonly string[];
+  unavailableOnPackages?: readonly BirdeyePackage[];
 };
 
 export const BIRDEYE_ENDPOINTS: Record<BirdeyeEndpointName, EndpointDefinition> = {
@@ -39,7 +43,8 @@ export const BIRDEYE_ENDPOINTS: Record<BirdeyeEndpointName, EndpointDefinition> 
     path: "/holder/v1/distribution",
     ttlSeconds: 60 * 60,
     requiredForSnapshot: false,
-    walletRateLimit: false
+    walletRateLimit: false,
+    supportedChains: ["solana"]
   },
   priceStats: {
     name: "priceStats",
@@ -57,7 +62,8 @@ export const BIRDEYE_ENDPOINTS: Record<BirdeyeEndpointName, EndpointDefinition> 
     path: "/defi/token_security",
     ttlSeconds: 60 * 60 * 6,
     requiredForSnapshot: false,
-    walletRateLimit: false
+    walletRateLimit: false,
+    unavailableOnPackages: ["standard"]
   },
   tokenTransfers: {
     name: "tokenTransfers",
@@ -66,7 +72,8 @@ export const BIRDEYE_ENDPOINTS: Record<BirdeyeEndpointName, EndpointDefinition> 
     path: "/token/v1/transfer",
     ttlSeconds: 60 * 3,
     requiredForSnapshot: false,
-    walletRateLimit: false
+    walletRateLimit: false,
+    supportedChains: ["solana"]
   },
   walletCurrentNetWorth: {
     name: "walletCurrentNetWorth",

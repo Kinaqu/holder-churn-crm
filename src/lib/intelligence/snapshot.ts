@@ -1,10 +1,11 @@
 import { getDemoDataset } from "@/lib/demo/demo-data";
-import { getBirdeyeClient } from "@/lib/birdeye/client";
+import { getBirdeyeClient, type BirdeyeResult } from "@/lib/birdeye/client";
+import { BIRDEYE_ENDPOINTS, type BirdeyeEndpointName, type BirdeyePackage } from "@/lib/birdeye/endpoints";
 import { normalizeHolders } from "@/lib/birdeye/normalizers";
 import { classifyHolderSegments } from "@/lib/intelligence/segments";
 import { calculateSnapshotScores } from "@/lib/intelligence/scoring";
 import { generateAlerts } from "@/lib/intelligence/alerts";
-import type { ApiCallLog, HolderSegment, HolderSnapshot, PipelineRun, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
+import type { ApiCallLog, BirdeyeSource, HolderSegment, HolderSnapshot, PipelineRun, PipelineSourceStatus, Token, TokenDataset, TokenSnapshot } from "@/lib/types";
 
 export class SnapshotError extends Error {
   constructor(
@@ -16,6 +17,21 @@ export class SnapshotError extends Error {
     super(message);
   }
 }
+
+type SkippedOptionalSource = {
+  ok: false;
+  skipped: true;
+  endpoint: BirdeyeEndpointName;
+  sourceLabel: BirdeyeSource;
+  detail: string;
+  cacheHit: false;
+  durationMs: number;
+  calls: 0;
+};
+
+type OptionalSourceResult<T> = BirdeyeResult<T> | SkippedOptionalSource;
+
+const capabilityCache = new Map<string, { expiresAt: number; detail: string }>();
 
 export async function runManualSnapshot(input: {
   tokenId: string;
@@ -62,7 +78,7 @@ export async function runManualSnapshot(input: {
       stayedUnderLimit: client.usage.calls <= 50,
       startedAt: startedAt.toISOString(),
       completedAt,
-      sources: [{ source: "Token Holder", status: "missing", detail: holdersResult.error, calls: holdersResult.cacheHit ? 0 : client.usage.calls }]
+      sources: [{ source: "Token Holder", status: "missing", detail: holdersResult.error, calls: holdersResult.calls }]
     };
     throw new SnapshotError("TOKEN_HOLDER_SOURCE_FAILED", `Token Holder is required for a live snapshot. ${holdersResult.error}`, 502, {
       pipelineRun,
@@ -70,12 +86,10 @@ export async function runManualSnapshot(input: {
     });
   }
 
-  const [distribution, price, security, transfers] = await Promise.all([
-    client.getHolderDistribution(chain, address),
-    client.getPriceStats(chain, address),
-    isTokenSecurityAvailable() ? client.getTokenSecurity(chain, address) : Promise.resolve(null),
-    client.getTokenTransfers(chain, address, { limit: 50 })
-  ]);
+  const distribution = await runOptionalSource("holderDistribution", chain, () => client.getHolderDistribution(chain, address));
+  const price = await runOptionalSource("priceStats", chain, () => client.getPriceStats(chain, address));
+  const security = await runOptionalSource("tokenSecurity", chain, () => client.getTokenSecurity(chain, address));
+  const transfers = await runOptionalSource("tokenTransfers", chain, () => client.getTokenTransfers(chain, address, { limit: 50 }));
 
   const holders = normalizeHolders(holdersResult.data);
   const previousHolders = input.previousHolders ?? [];
@@ -91,24 +105,11 @@ export async function runManualSnapshot(input: {
     segments
   });
 
-  const expectedOptionalResults = [distribution, price, transfers, ...(security ? [security] : [])];
-  const tokenSecuritySource = security
-    ? {
-        source: "Token Security" as const,
-        status: security.ok ? ("complete" as const) : ("missing" as const),
-        detail: security.ok ? "risk context added" : security.error,
-        calls: security.cacheHit ? 0 : 1
-      }
-    : {
-        source: "Token Security" as const,
-        status: "skipped" as const,
-        detail: `not available on Birdeye ${birdeyePackageLabel()} package`,
-        calls: 0
-      };
+  const attemptedOptionalResults = [distribution, price, security, transfers].filter(isAttemptedSource);
 
   const pipelineRun: PipelineRun = {
     id: input.runId ?? `run-${Date.now()}`,
-    status: expectedOptionalResults.some((result) => !result.ok) ? "partial" : "complete",
+    status: attemptedOptionalResults.some((result) => !result.ok) ? "partial" : "complete",
     mode: "live",
     apiCallsUsed: client.usage.calls,
     apiSafeBudget: 50,
@@ -122,15 +123,15 @@ export async function runManualSnapshot(input: {
     startedAt: startedAt.toISOString(),
     completedAt: new Date().toISOString(),
     sources: [
-      { source: "Token Holder", status: "complete", detail: previousHolders.length ? `${holders.length} holders scanned` : `${holders.length} holders scanned; baseline snapshot`, calls: holdersResult.cacheHit ? 0 : 1 },
-      { source: "Holder Distribution", status: distribution.ok ? "complete" : "missing", detail: distribution.ok ? "concentration calculated" : distribution.error, calls: distribution.cacheHit ? 0 : 1 },
-      { source: "Price Stats", status: price.ok ? "complete" : "missing", detail: price.ok ? "market context added" : price.error, calls: price.cacheHit ? 0 : 1 },
-      tokenSecuritySource,
-      { source: "Token Transfer", status: transfers.ok ? "complete" : "missing", detail: transfers.ok ? "transfer context added" : transfers.error, calls: transfers.cacheHit ? 0 : 1 },
+      { source: "Token Holder", status: "complete", detail: previousHolders.length ? `${holders.length} holders scanned` : `${holders.length} holders scanned; baseline snapshot`, calls: holdersResult.calls },
+      sourceStatus(distribution, "concentration calculated"),
+      sourceStatus(price, "market context added"),
+      sourceStatus(security, "risk context added"),
+      sourceStatus(transfers, "transfer context added"),
       { source: "Wallet Current Net Worth", status: "skipped", detail: "wallet enrichment deferred unless a high-priority wallet needs it", calls: 0 }
     ]
   };
-  const apiCallLogs = toApiCallLogs([holdersResult, distribution, price, transfers, ...(security ? [security] : [])], pipelineRun.id, input.tokenId);
+  const apiCallLogs = toApiCallLogs([holdersResult, ...attemptedOptionalResults], pipelineRun.id, input.tokenId);
 
   return {
     token: {
@@ -174,12 +175,117 @@ export function isDemoMode() {
   return process.env.DEMO_MODE === "true";
 }
 
-function isTokenSecurityAvailable() {
-  return new Set(["lite", "starter", "premium", "business", "enterprise"]).has(birdeyePackageLabel());
+async function runOptionalSource<T>(endpointName: BirdeyeEndpointName, chain: string, request: () => Promise<BirdeyeResult<T>>): Promise<OptionalSourceResult<T>> {
+  const skipDetail = optionalSkipDetail(endpointName, chain);
+  if (skipDetail) return skippedSource(endpointName, skipDetail);
+
+  const result = await request();
+  if (!result.ok && isCapabilityStatus(result.statusCode)) {
+    const detail = `endpoint not available for current Birdeye key/package (${result.statusCode})`;
+    rememberCapability(endpointName, chain, detail);
+    return skippedSource(endpointName, detail, result.durationMs);
+  }
+  if (!result.ok && result.statusCode === 429 && isDeferrableOptionalSource(endpointName)) {
+    return skippedSource(endpointName, rateLimitSkipDetail(result), result.durationMs);
+  }
+
+  return result;
 }
 
-function birdeyePackageLabel() {
-  return String(process.env.BIRDEYE_PACKAGE ?? "standard").trim().toLowerCase();
+function optionalSkipDetail(endpointName: BirdeyeEndpointName, chain: string) {
+  const endpoint = BIRDEYE_ENDPOINTS[endpointName];
+  const packageLabel = birdeyePackageLabel();
+  if (endpoint.unavailableOnPackages?.includes(packageLabel)) {
+    return `not available on Birdeye ${packageLabel} package`;
+  }
+
+  if (endpointName === "tokenSecurity" && process.env.BIRDEYE_TOKEN_SECURITY_ENABLED !== "true") {
+    return "disabled unless BIRDEYE_TOKEN_SECURITY_ENABLED=true for a Birdeye package that includes Token Security";
+  }
+
+  const normalizedChain = chain.trim().toLowerCase();
+  if (endpoint.supportedChains && !endpoint.supportedChains.includes(normalizedChain)) {
+    return `only supported on ${endpoint.supportedChains.join(", ")}; current chain is ${normalizedChain || "unknown"}`;
+  }
+
+  const cached = capabilityCache.get(capabilityKey(endpointName, chain));
+  if (cached && cached.expiresAt > Date.now()) return cached.detail;
+  if (cached) capabilityCache.delete(capabilityKey(endpointName, chain));
+
+  return undefined;
+}
+
+function sourceStatus<T>(result: OptionalSourceResult<T>, completeDetail: string): PipelineSourceStatus {
+  if (isSkippedSource(result)) {
+    return {
+      source: result.sourceLabel,
+      status: "skipped",
+      detail: result.detail,
+      calls: 0
+    };
+  }
+
+  return {
+    source: result.sourceLabel,
+    status: result.ok ? "complete" : "missing",
+    detail: result.ok ? completeDetail : result.error,
+    calls: result.calls
+  };
+}
+
+function isAttemptedSource<T>(result: OptionalSourceResult<T>): result is BirdeyeResult<T> {
+  return !isSkippedSource(result);
+}
+
+function isSkippedSource<T>(result: OptionalSourceResult<T>): result is SkippedOptionalSource {
+  return "skipped" in result && result.skipped;
+}
+
+function skippedSource(endpointName: BirdeyeEndpointName, detail: string, durationMs = 0): SkippedOptionalSource {
+  return {
+    ok: false,
+    skipped: true,
+    endpoint: endpointName,
+    sourceLabel: BIRDEYE_ENDPOINTS[endpointName].label,
+    detail,
+    cacheHit: false,
+    durationMs,
+    calls: 0
+  };
+}
+
+function isCapabilityStatus(statusCode?: number) {
+  return statusCode === 401 || statusCode === 403;
+}
+
+function isDeferrableOptionalSource(endpointName: BirdeyeEndpointName) {
+  return endpointName === "holderDistribution" || endpointName === "tokenTransfers";
+}
+
+function rateLimitSkipDetail(result: { retryAfterMs?: number }) {
+  const retryText = result.retryAfterMs ? ` retry after ${Math.ceil(result.retryAfterMs / 1000)}s.` : "";
+  return `deferred because Birdeye returned 429 for this optional source.${retryText}`;
+}
+
+function rememberCapability(endpointName: BirdeyeEndpointName, chain: string, detail: string) {
+  capabilityCache.set(capabilityKey(endpointName, chain), {
+    expiresAt: Date.now() + 6 * 60 * 60 * 1000,
+    detail
+  });
+}
+
+function capabilityKey(endpointName: BirdeyeEndpointName, chain: string) {
+  return `${endpointName}:${birdeyePackageLabel()}:${chain.trim().toLowerCase()}`;
+}
+
+function birdeyePackageLabel(): BirdeyePackage {
+  const value = String(process.env.BIRDEYE_PACKAGE ?? "standard").trim().toLowerCase();
+  if (isBirdeyePackage(value)) return value;
+  return "standard";
+}
+
+function isBirdeyePackage(value: string): value is BirdeyePackage {
+  return new Set(["standard", "lite", "starter", "premium", "business", "enterprise"]).has(value);
 }
 
 function createBaselineSegments(holders: HolderSnapshot[]): HolderSegment[] {
